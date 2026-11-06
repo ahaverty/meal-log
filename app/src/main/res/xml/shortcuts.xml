@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="plan" android:enabled="true" android:icon="@drawable/sc_plan"
+        android:shortcutShortLabel="@string/sc_plan" android:shortcutLongLabel="@string/sc_plan_long">
+        <intent android:action="android.intent.action.VIEW" android:data="meallog://plan"
+            android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="photo" android:enabled="true" android:icon="@drawable/sc_camera"
+        android:shortcutShortLabel="@string/sc_photo" android:shortcutLongLabel="@string/sc_photo_long">
+        <intent android:action="android.intent.action.VIEW" android:data="meallog://plan?camera=1"
+            android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="log" android:enabled="true" android:icon="@drawable/sc_log"
+        android:shortcutShortLabel="@string/sc_log" android:shortcutLongLabel="@string/sc_log_long">
+        <intent android:action="android.intent.action.VIEW" android:data="meallog://log"
+            android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="remind" android:enabled="true" android:icon="@drawable/sc_alarm"
+        android:shortcutShortLabel="@string/sc_remind" android:shortcutLongLabel="@string/sc_remind_long">
+        <intent android:action="android.intent.action.VIEW" android:data="meallog://remind?min=15"
+            android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
+    </shortcut>
+</shortcuts>

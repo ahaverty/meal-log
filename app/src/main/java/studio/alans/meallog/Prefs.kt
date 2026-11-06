@@ -3,7 +3,7 @@ package studio.alans.meallog
 import android.content.Context
 import android.content.SharedPreferences
 
-/** Settings and the little state the app keeps. Server settings default to the baked-in build values. */
+/** Settings and the little state the app keeps. */
 class Prefs(c: Context) {
     val p: SharedPreferences = c.getSharedPreferences("meallog", Context.MODE_PRIVATE)
 
@@ -16,18 +16,13 @@ class Prefs(c: Context) {
         }
     }
 
-    var url: String
-        get() = p.getString("url", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.MEAL_URL
-        set(v) = p.edit().putString("url", v.trim().trimEnd('/')).apply()
-    var token: String
-        get() = p.getString("token", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.MEAL_TOKEN
-        set(v) = p.edit().putString("token", v.trim()).apply()
-    var cfId: String
-        get() = p.getString("cf_id", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.CF_ID
-        set(v) = p.edit().putString("cf_id", v.trim()).apply()
-    var cfSecret: String
-        get() = p.getString("cf_secret", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.CF_SECRET
-        set(v) = p.edit().putString("cf_secret", v.trim()).apply()
+    private fun str(k: String) = p.getString(k, "") ?: ""
+    private fun put(k: String, v: String) = p.edit().putString(k, v.trim()).apply()
+
+    var url: String get() = str("url"); set(v) = put("url", v.trimEnd('/'))
+    var token: String get() = str("token"); set(v) = put("token", v)
+    var cfId: String get() = str("cf_id"); set(v) = put("cf_id", v)
+    var cfSecret: String get() = str("cf_secret"); set(v) = put("cf_secret", v)
 
     /** Open the sheet after a meal bolus. */
     var askAfterBolus: Boolean
@@ -38,7 +33,7 @@ class Prefs(c: Context) {
         get() = p.getInt("min_carbs", 10)
         set(v) = p.edit().putInt("min_carbs", v).apply()
 
-    /** Last bolus FX Watcher told us about (ms), for the reminder check. */
+    /** Last bolus FX Watcher told us about. */
     var lastBolusAt: Long
         get() = p.getLong("last_bolus_at", 0)
         set(v) = p.edit().putLong("last_bolus_at", v).apply()
@@ -49,30 +44,28 @@ class Prefs(c: Context) {
         get() = p.getFloat("last_bolus_carbs", -1f)
         set(v) = p.edit().putFloat("last_bolus_carbs", v).apply()
 
-    /** The bolus reminder: when it rings (0 = none), when it was set, and what for. */
-    var reminderAt: Long
-        get() = p.getLong("reminder_at", 0)
-        set(v) = p.edit().putLong("reminder_at", v).apply()
-    var reminderSetAt: Long
-        get() = p.getLong("reminder_set_at", 0)
-        set(v) = p.edit().putLong("reminder_set_at", v).apply()
-    var reminderNote: String
-        get() = p.getString("reminder_note", "") ?: ""
-        set(v) = p.edit().putString("reminder_note", v).apply()
-
-    /** The last meal planned in the Plan tab: the sheet after the next bolus offers it first. */
-    var planSummary: String
-        get() = p.getString("plan_summary", "") ?: ""
-        set(v) = p.edit().putString("plan_summary", v).apply()
-    var planCarbs: Float
-        get() = p.getFloat("plan_carbs", -1f)
-        set(v) = p.edit().putFloat("plan_carbs", v).apply()
-    var planAt: Long
-        get() = p.getLong("plan_at", 0)
-        set(v) = p.edit().putLong("plan_at", v).apply()
-
-    /** Bolus times (ms) the sheet has already been shown or answered for. */
+    /** The bolus the sheet was last opened for, and the last bolus whose food got logged. */
     var handledBolus: Long
         get() = p.getLong("handled_bolus", 0)
         set(v) = p.edit().putLong("handled_bolus", v).apply()
+    var loggedBolus: Long
+        get() = p.getLong("logged_bolus", 0)
+        set(v) = p.edit().putLong("logged_bolus", v).apply()
+
+    /** A meal bolus in the last 3 h with nothing logged for it yet, or 0. */
+    fun unloggedBolus(now: Long = System.currentTimeMillis()): Long {
+        val at = lastBolusAt
+        return if (at > 0 && now - at < 3 * 3600_000L && lastBolusCarbs >= minCarbs && loggedBolus != at) at else 0
+    }
+
+    /** The last plan (JSON from the server, plus what was asked), kept for 3 h. */
+    var planJson: String get() = str("plan_json"); set(v) = p.edit().putString("plan_json", v).apply()
+    var planAt: Long
+        get() = p.getLong("plan_at", 0)
+        set(v) = p.edit().putLong("plan_at", v).apply()
+    /** What was planned, for the sheet after the bolus ("" once used). */
+    var planSummary: String get() = str("plan_summary"); set(v) = p.edit().putString("plan_summary", v).apply()
+    var planCarbs: Float
+        get() = p.getFloat("plan_carbs", -1f)
+        set(v) = p.edit().putFloat("plan_carbs", v).apply()
 }

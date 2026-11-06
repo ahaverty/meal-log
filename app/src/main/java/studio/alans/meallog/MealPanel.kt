@@ -81,49 +81,61 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
         runCatching { api.foods(q, at) }.onSuccess { matches = it }
     }
 
+    val pr = remember { Prefs(c) }
+    var tapped by remember { mutableStateOf<List<Food>>(emptyList()) }
+    fun markLogged() { if (at == pr.lastBolusAt) pr.loggedBolus = at }
+
     fun log(items: List<Food>) {
         busy = true
+        tapped = items
         scope.launch {
             runCatching { api.log(items, at) }
-                .onSuccess { done = it; plate.clear(); query = "" }
+                .onSuccess { done = it; plate.clear(); query = ""; if (it.entryIds.isNotEmpty() || it.problems.isEmpty()) markLogged() }
                 .onFailure { error = it.message }
             busy = false
         }
     }
 
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(if (sheet) "What are you eating?" else "Log a meal",
-                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                val sub = buildList {
-                    if (carbs != null) add("${carbs.toInt()} g")
-                    if (units != null && units > 0) add("${"%.1f".format(units)} U")
-                    add("at ${Api.hhmm(at)}")
-                }.joinToString(" · ")
-                Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (sheet) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("What are you eating?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                    val sub = buildList {
+                        if (carbs != null) add("${carbs.toInt()} g")
+                        if (units != null && units > 0) add("${"%.1f".format(units)} U")
+                        add("at ${Api.hhmm(at)}")
+                    }.joinToString(" · ")
+                    Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { onDone(false) }) { Icon(Icons.Default.Close, "Not now") }
             }
-            if (sheet) IconButton(onClick = { onDone(false) }) { Icon(Icons.Default.Close, "Not now") }
+            Spacer(Modifier.height(12.dp))
+        } else {
+            Text(if (carbs != null) "Usual for ${carbs.toInt()} g around ${Api.hhmm(at)}" else "Usual around ${Api.hhmm(at)}",
+                style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 4.dp))
         }
-        Spacer(Modifier.height(12.dp))
 
         val d = done
         if (d != null) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp).fillMaxWidth()) {
-                    Text("Logged at ${Api.hhmm(at)}", fontWeight = FontWeight.SemiBold)
-                    Text(d.logged.joinToString(", ").ifBlank { "Nothing new" })
-                    d.problems.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+                    val names = d.logged.ifEmpty { tapped.map { "${it.name.substringBefore(" (")} (${fmt(it.quantity)} ${it.unit})" } }
+                    Text(if (d.problems.isEmpty() || d.entryIds.isNotEmpty()) "Logged at ${Api.hhmm(at)}" else "Not logged",
+                        fontWeight = FontWeight.SemiBold)
+                    Text(names.joinToString(", "))
+                    if (d.entryIds.isEmpty()) d.problems.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     Row {
-                        TextButton(onClick = {
+                        if (d.entryIds.isNotEmpty()) TextButton(onClick = {
                             scope.launch {
                                 runCatching { api.undo(d.entryIds) }.onFailure { error = it.message }
+                                if (at == pr.loggedBolus) pr.loggedBolus = 0
                                 done = null
                                 reload++
                             }
                         }) { Text("Undo") }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { done = null; if (sheet) onDone(true) else reload++ }) { Text("OK") }
+                        TextButton(onClick = { done = null; if (sheet) onDone(true) else reload++ }) { Text("Done") }
                     }
                 }
             }
@@ -131,8 +143,9 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
             return@Column
         }
         queuedText?.let { t ->
+            LaunchedEffect(t) { markLogged() }
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                Text("Sent: \"$t\". It's logged at ${Api.hhmm(at)} in about 20 s.", Modifier.padding(16.dp))
+                Text("Got it: \"$t\". It lands in your diary at ${Api.hhmm(at)} in about 20 s.", Modifier.padding(16.dp))
             }
             LaunchedEffect(t) { delay(3500); if (sheet) onDone(true) else { queuedText = null; reload++ } }
             return@Column
@@ -144,7 +157,6 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
         }
 
         // A meal planned in the Plan tab in the last 3 h comes first.
-        val pr = remember { Prefs(c) }
         if (sheet && pr.planSummary.isNotBlank() && System.currentTimeMillis() - pr.planAt < 3 * 3600_000L) {
             Card(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(enabled = !busy) {

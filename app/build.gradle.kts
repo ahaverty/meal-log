@@ -26,8 +26,8 @@ android {
         minSdk = 31
         targetSdk = 35
         // A release = bump both, add a RELEASE_NOTES.md line, push a v* tag (CI publishes it).
-        versionCode = 104
-        versionName = "0.4.0"
+        versionCode = 105
+        versionName = "0.5.0"
         buildConfigField("String", "MEAL_URL", secret("MEAL_URL"))
         buildConfigField("String", "MEAL_TOKEN", secret("MEAL_TOKEN"))
         buildConfigField("String", "CF_ID", secret("CF_ID"))
@@ -87,6 +87,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")

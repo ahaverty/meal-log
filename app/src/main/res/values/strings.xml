@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sc_plan">Plan a meal</string>
+    <string name="sc_plan_long">Plan a meal (carbs and bolus)</string>
+    <string name="sc_photo">Photo a meal</string>
+    <string name="sc_photo_long">Photograph a plate or menu</string>
+    <string name="sc_log">Log food</string>
+    <string name="sc_log_long">Log what you ate</string>
+    <string name="sc_remind">Bolus in 15 min</string>
+    <string name="sc_remind_long">Remind me to bolus in 15 min</string>
+</resources>

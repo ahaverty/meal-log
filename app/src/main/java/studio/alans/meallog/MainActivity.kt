@@ -2,203 +2,210 @@ package studio.alans.meallog
 
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-/** Home: log what you're eating now (guessed from the time of day), and the bolus reminder. */
+enum class Page(val title: String) { Plan("Plan a meal"), Log("Log food"), Reminders("Reminders"), Settings("Settings") }
+
+/** Where to open: a page, plus what a link or shortcut brought. n changes on every open, so the same link reopens. */
+data class Route(val page: Page, val plan: PlanStart? = null, val install: Boolean = false, val n: Long = System.nanoTime())
+
+/**
+ * Plan (default), Log and Reminders, Settings behind the gear. meallog:// links and the launcher
+ * shortcuts open the right page; with a meal bolus not logged yet, the app opens on Log.
+ */
 class MainActivity : ComponentActivity() {
+    private val route = mutableStateOf(Route(Page.Plan))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        setContent { MealTheme { Surface(Modifier.fillMaxSize()) { Home() } } }
+        route.value = route(intent)
+        setContent { MealTheme { App(route.value) { route.value = it } } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        route.value = route(intent)
+    }
+
+    private fun route(i: Intent?): Route {
+        val u = i?.data
+        if (i?.action == Updater.ACTION_INSTALL) return Route(Page.Settings, install = true)
+        if (u?.scheme != "meallog") {
+            return Route(if (Prefs(this).unloggedBolus() > 0) Page.Log else Page.Plan)
+        }
+        return when (u.host) {
+            "log" -> Route(Page.Log)
+            "reminders" -> Route(Page.Reminders)
+            "settings" -> Route(Page.Settings)
+            "remind" -> {
+                val m = u.getQueryParameter("min")?.toIntOrNull()?.coerceIn(1, 240) ?: 15
+                val r = Reminders.add(this, m, u.getQueryParameter("text").orEmpty(), bolus = true)
+                Toast.makeText(this, "Bolus reminder at ${Api.hhmm(r.at)}", Toast.LENGTH_SHORT).show()
+                Route(Page.Reminders)
+            }
+            else -> Route(Page.Plan, PlanStart(u.getQueryParameter("text"), u.getQueryParameter("camera") == "1"))
+        }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Home() {
+private fun App(route: Route, go: (Route) -> Unit) {
+    val c = LocalContext.current
+    val page = route.page
+    val reminders = run { Reminders.version.collectAsState().value; Reminders.all(c) }
+    LaunchedEffect(Unit) { Updater.check(c, force = false) }   // quiet; shows as a notification + in Settings
+    BackHandler(page == Page.Settings) { go(Route(Page.Plan)) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(page.title) },
+                navigationIcon = {
+                    if (page == Page.Settings) IconButton(onClick = { go(Route(Page.Plan)) }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    if (page != Page.Settings) IconButton(onClick = { go(Route(Page.Settings)) }) {
+                        BadgedBox(badge = { if (Updater.available(c) != null) Badge() }) { Icon(Icons.Default.Settings, "Settings") }
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            if (page != Page.Settings) NavigationBar {
+                NavigationBarItem(page == Page.Plan, { go(Route(Page.Plan)) },
+                    icon = { Icon(painterResource(R.drawable.sc_plan), null) }, label = { Text("Plan") })
+                NavigationBarItem(page == Page.Log, { go(Route(Page.Log)) },
+                    icon = {
+                        BadgedBox(badge = { if (Prefs(c).unloggedBolus() > 0) Badge() }) { Icon(painterResource(R.drawable.sc_log), null) }
+                    }, label = { Text("Log") })
+                NavigationBarItem(page == Page.Reminders, { go(Route(Page.Reminders)) },
+                    icon = {
+                        BadgedBox(badge = { if (reminders.isNotEmpty()) Badge { Text("${reminders.size}") } }) {
+                            Icon(painterResource(R.drawable.sc_alarm), null)
+                        }
+                    }, label = { Text("Reminders") })
+            }
+        },
+    ) { pad ->
+        Column(Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState())) {
+            key(route.n) {
+                when (page) {
+                    Page.Plan -> PlanScreen(route.plan)
+                    Page.Log -> LogPage()
+                    Page.Reminders -> RemindersPage(reminders)
+                    Page.Settings -> SettingsScreen(autoInstall = route.install)
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LogPage() {
     val c = LocalContext.current
     val p = remember { Prefs(c) }
-    var settings by remember { mutableStateOf(false) }
     val openedAt = remember { System.currentTimeMillis() }
-    Column(Modifier.safeDrawingPadding().imePadding().verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Meal Log", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Settings") }
-        }
-        if (!Settings.canDrawOverlays(c)) {
-            Card(Modifier.padding(horizontal = 16.dp).fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("To pop up over CamAPS after a bolus, allow Display over other apps.")
-                    TextButton(onClick = {
-                        c.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${c.packageName}")))
-                    }) { Text("Allow") }
-                }
+    val bolusAt = remember { p.unloggedBolus() }
+    var forBolus by remember { mutableStateOf(bolusAt > 0) }
+    Column {
+        if (bolusAt > 0) {
+            Text("Which meal?", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+            FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(forBolus, { forBolus = true },
+                    label = { Text("The ${Api.hhmm(bolusAt)} bolus, ${p.lastBolusCarbs.toInt()} g") })
+                FilterChip(!forBolus, { forBolus = false }, label = { Text("Something now") })
             }
         }
-        var tab by remember { mutableStateOf(0) }
-        TabRow(selectedTabIndex = tab, modifier = Modifier.padding(top = 8.dp)) {
-            Tab(tab == 0, { tab = 0 }, text = { Text("Log") })
-            Tab(tab == 1, { tab = 1 }, text = { Text("Plan") })
-        }
-        if (tab == 0) {
-            ReminderCard(p)
-            MealPanel(openedAt, null, null, sheet = false) { }
-        } else {
-            PlanScreen()
-        }
-        UpdateRow()
-        Spacer(Modifier.height(32.dp))
-    }
-    if (settings) SettingsDialog(p) { settings = false }
-}
-
-/** Check for update / Install vX / Releases, like FX Watcher. Also checks quietly every 6 h on open. */
-@Composable
-private fun UpdateRow() {
-    val c = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var avail by remember { mutableStateOf(Updater.available(c)) }
-    var msg by remember { mutableStateOf<String?>(null) }
-    val act = c as? ComponentActivity
-    LaunchedEffect(Unit) {
-        Updater.check(c, force = false)
-        avail = Updater.available(c)
-        if (act?.intent?.action == Updater.ACTION_INSTALL && avail != null) msg = Updater.install(c)
-    }
-    Column(Modifier.padding(horizontal = 16.dp)) {
-        HorizontalDivider()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("v${Updater.installedName(c)}", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            val a = avail
-            if (a != null) {
-                TextButton(onClick = { msg = "Downloading the update…"; scope.launch { msg = Updater.install(c) } }) {
-                    Text("Install v${a.name}")
-                }
-            } else {
-                TextButton(onClick = {
-                    msg = "Checking…"
-                    scope.launch { msg = Updater.check(c, force = true); avail = Updater.available(c) }
-                }) { Text("Check for update") }
-            }
-            TextButton(onClick = { c.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.RELEASES))) }) {
-                Text("Releases")
-            }
-        }
-        msg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        avail?.notes?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        key(forBolus) {
+            if (forBolus) MealPanel(bolusAt, p.lastBolusCarbs.toDouble(), p.lastBolusUnits.toDouble(), sheet = false) { }
+            else MealPanel(openedAt, null, null, sheet = false) { }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ReminderCard(p: Prefs) {
+private fun RemindersPage(list: List<Reminder>) {
     val c = LocalContext.current
-    var at by remember { mutableLongStateOf(p.reminderAt) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var note by remember { mutableStateOf("") }
-    LaunchedEffect(at) { while (true) { now = System.currentTimeMillis(); at = p.reminderAt; delay(5000) } }
-    Card(Modifier.padding(16.dp).fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Remind me to bolus", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            if (at > now) {
-                val mins = ((at - now) / 60_000L) + 1
-                Text("Rings at ${Api.hhmm(at)} (in $mins min)${p.reminderNote.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""}. " +
-                        "A bolus before then cancels it.")
-                TextButton(onClick = { Reminders.cancel(c); at = 0 }) { Text("Cancel reminder") }
-            } else {
-                Text("Ordering now, eating soon? It rings only if you haven't bolused by then.",
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (list.isEmpty()) {
+            Text("Nothing coming up.", style = MaterialTheme.typography.bodyLarge)
+            Text("Plans set their own reminders. Bolus reminders cancel themselves when FX Watcher sees the bolus.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            list.forEach { ReminderRow(it) }
+        }
+        Spacer(Modifier.height(20.dp))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Remind me to bolus", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Ordered, eating soon? It rings only if you haven't bolused by then.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    placeholder = { Text("What for? (optional, e.g. sandwich 45 g)") }, singleLine = true)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    placeholder = { Text("What for? (optional)") }, singleLine = true)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(5, 10, 15, 20, 30).forEach { m ->
-                        FilledTonalButton(onClick = { Reminders.set(c, m, note.trim()); at = p.reminderAt; note = "" },
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp)) { Text("$m m") }
+                        FilledTonalButton(onClick = { Reminders.add(c, m, note.trim(), bolus = true); note = "" }) { Text("$m min") }
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun SettingsDialog(p: Prefs, close: () -> Unit) {
-    var ask by remember { mutableStateOf(p.askAfterBolus) }
-    var min by remember { mutableStateOf(p.minCarbs.toString()) }
-    var url by remember { mutableStateOf(p.url) }
-    var token by remember { mutableStateOf(p.token) }
-    var cfId by remember { mutableStateOf(p.cfId) }
-    var cfSecret by remember { mutableStateOf(p.cfSecret) }
-    AlertDialog(onDismissRequest = close, title = { Text("Settings") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Ask after a meal bolus", Modifier.weight(1f)); Switch(ask, { ask = it })
-            }
-            OutlinedTextField(min, { min = it.filter(Char::isDigit) }, label = { Text("Meal bolus from (g carbs)") })
-            Text("Needs FX Watcher 3.11+ with Settings > Connections > Share boluses on.",
-                style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(url, { url = it }, label = { Text("Server address") })
-            OutlinedTextField(token, { token = it }, label = { Text("App token") })
-            OutlinedTextField(cfId, { cfId = it }, label = { Text("Cloudflare Access client id") })
-            OutlinedTextField(cfSecret, { cfSecret = it }, label = { Text("Cloudflare Access client secret") })
-        }
-    }, confirmButton = {
-        TextButton(onClick = {
-            p.askAfterBolus = ask; p.minCarbs = min.toIntOrNull() ?: 10
-            p.url = url; p.token = token; p.cfId = cfId; p.cfSecret = cfSecret
-            close()
-        }) { Text("Save") }
-    }, dismissButton = { OutlinedButton(onClick = close) { Text("Cancel") } })
 }

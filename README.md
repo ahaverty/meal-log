@@ -20,7 +20,12 @@ It's the moment you remember best, and one tap beats being asked an hour later.
 - **Open it any time**: it guesses from the time of day and shows what's logged today.
 - **Remind me to bolus**: ordering now, eating in 10 minutes? Pick 5-30 min. If FX Watcher sees a
   bolus before then the reminder cancels itself; if not, it rings like an alarm.
-- **Updates itself** from this repo's releases (quiet notification, or Check for update).
+- **Plan a meal**: describe it or photograph the plate or menu, say when you're eating, and the
+  meal server's planner gives the CamAPS entry and when to bolus. Its reminders set themselves.
+- **Updates itself** from this repo's releases (quiet notification, or Settings > Check for update).
+
+Long-press the icon for shortcuts. Links open pages too: `meallog://plan?text=...&camera=1`,
+`meallog://log`, `meallog://reminders`, `meallog://remind?min=15&text=...`, `meallog://settings`.
 
 ## Setup
 
@@ -46,6 +51,8 @@ Meal Log keeps no food data itself. It talks to a small HTTP server you run next
 | `POST /undo {entry_ids}` | deletes what `/log` just made |
 | `POST /text {at, text}` | free text to estimate and log later; `{queued: true}` |
 | `POST /skip {at}` | that bolus had no food |
+| `POST /plan {text, image_b64?, eat_in_min?, session?}` | starts a plan; `{job}` |
+| `GET /plan/<job>` | `{state: working/done/failed, text, session, extras: {eat_in_min, bolus_in_min, bolus_when, carbs, slow_carbs, reminders: [{in_min, text}], summary}}` |
 
 `food` is `{food_id, name, quantity, unit, carbs}`.
 

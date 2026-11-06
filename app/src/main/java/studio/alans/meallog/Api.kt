@@ -28,7 +28,30 @@ data class Food(val foodId: String, val name: String, val quantity: Double, val 
 data class Guess(val id: String, val label: String, val carbs: Int, val times: Int, val items: List<Food>)
 data class Logged(val time: String, val name: String, val carbs: Double)
 data class Guesses(val mealType: String, val guesses: List<Guess>, val today: List<Logged>)
-data class Plan(val text: String, val session: String?, val bolusInMin: Int?, val carbs: Double?, val summary: String)
+data class Step(val inMin: Int, val text: String)
+
+/** A meal plan from the server. madeAt = when it came back; minutes in it count from then. */
+data class Plan(val asked: String, val text: String, val session: String?, val eatInMin: Int?, val bolusInMin: Int?,
+                val bolusWhen: String, val carbs: Double?, val slowCarbs: Double?, val steps: List<Step>,
+                val summary: String, val madeAt: Long) {
+    fun json(): JSONObject = JSONObject().put("asked", asked).put("text", text).put("session", session)
+        .put("made_at", madeAt).put("extras", JSONObject().put("eat_in_min", eatInMin).put("bolus_in_min", bolusInMin)
+            .put("bolus_when", bolusWhen).put("carbs", carbs).put("slow_carbs", slowCarbs).put("summary", summary)
+            .put("reminders", JSONArray().apply { steps.forEach { put(JSONObject().put("in_min", it.inMin).put("text", it.text)) } }))
+
+    companion object {
+        fun of(j: JSONObject, asked: String = j.optString("asked"), madeAt: Long = j.optLong("made_at", System.currentTimeMillis())): Plan {
+            val x = j.optJSONObject("extras") ?: JSONObject()
+            fun int(k: String) = if (x.has(k) && !x.isNull(k)) x.optInt(k) else null
+            fun dbl(k: String) = if (x.has(k) && !x.isNull(k)) x.optDouble(k) else null
+            return Plan(asked, j.optString("text"), j.optString("session").ifBlank { null }, int("eat_in_min"),
+                int("bolus_in_min"), x.optString("bolus_when"), dbl("carbs"), dbl("slow_carbs"),
+                x.optJSONArray("reminders").objects().map { Step(it.optInt("in_min"), it.optString("text")) }
+                    .filter { it.inMin > 0 && it.text.isNotBlank() },
+                x.optString("summary"), madeAt)
+        }
+    }
+}
 data class LogResult(val logged: List<String>, val entryIds: List<String>, val problems: List<String>)
 
 /** Your meal server (see the README for the API), optionally behind Cloudflare Access. */
@@ -95,24 +118,20 @@ class Api(c: Context) {
     }
 
     /** Starts a meal plan (text and/or a JPEG); session continues an earlier one. Returns the job id. */
-    suspend fun plan(text: String, jpeg: ByteArray?, session: String?): String {
+    suspend fun plan(text: String, jpeg: ByteArray?, session: String?, eatInMin: Int?): String {
         val j = JSONObject().put("text", text)
+        if (eatInMin != null) j.put("eat_in_min", eatInMin)
         if (jpeg != null) j.put("image_b64", android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP))
         if (session != null) j.put("session", session)
         return call(post("/plan", j)).getString("job")
     }
 
     /** Waits for a plan job (it runs Claude, 20-60 s). */
-    suspend fun planResult(job: String): Plan {
+    suspend fun planResult(job: String, asked: String): Plan {
         while (true) {
             val j = call(req("/plan/$job").build())
             when (j.optString("state")) {
-                "done" -> {
-                    val x = j.optJSONObject("extras") ?: JSONObject()
-                    return Plan(j.optString("text"), j.optString("session").ifBlank { null },
-                        if (x.isNull("bolus_in_min")) null else x.optInt("bolus_in_min"),
-                        if (x.isNull("carbs")) null else x.optDouble("carbs"), x.optString("summary"))
-                }
+                "done" -> return Plan.of(j, asked, System.currentTimeMillis())
                 "failed" -> throw RuntimeException(j.optString("error", "The planner failed"))
                 "unknown" -> throw RuntimeException("The server restarted, try again")
             }
