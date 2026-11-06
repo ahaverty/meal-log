@@ -60,6 +60,17 @@ class Prefs(c: Context) {
         get() = p.getString("reminder_note", "") ?: ""
         set(v) = p.edit().putString("reminder_note", v).apply()
 
+    /** The last meal planned in the Plan tab: the sheet after the next bolus offers it first. */
+    var planSummary: String
+        get() = p.getString("plan_summary", "") ?: ""
+        set(v) = p.edit().putString("plan_summary", v).apply()
+    var planCarbs: Float
+        get() = p.getFloat("plan_carbs", -1f)
+        set(v) = p.edit().putFloat("plan_carbs", v).apply()
+    var planAt: Long
+        get() = p.getLong("plan_at", 0)
+        set(v) = p.edit().putLong("plan_at", v).apply()
+
     /** Bolus times (ms) the sheet has already been shown or answered for. */
     var handledBolus: Long
         get() = p.getLong("handled_bolus", 0)

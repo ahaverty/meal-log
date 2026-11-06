@@ -143,6 +143,29 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
             TextButton(onClick = { reload++ }) { Text("Try again") }
         }
 
+        // A meal planned in the Plan tab in the last 3 h comes first.
+        val pr = remember { Prefs(c) }
+        if (sheet && pr.planSummary.isNotBlank() && System.currentTimeMillis() - pr.planAt < 3 * 3600_000L) {
+            Card(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(enabled = !busy) {
+                    val t = pr.planSummary
+                    pr.planSummary = ""
+                    sendText(api, scope, t, at, { queuedText = t }, { error = it })
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            ) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(pr.planSummary, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("You planned this at ${Api.hhmm(pr.planAt)}", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (pr.planCarbs >= 0) Text("${pr.planCarbs.toInt()} g", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
         // Guesses: one tap logs.
         val g = guesses
         if (g == null && error == null) {

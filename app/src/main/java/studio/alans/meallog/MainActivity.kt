@@ -47,6 +47,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,8 +84,17 @@ private fun Home() {
                 }
             }
         }
-        ReminderCard(p)
-        MealPanel(openedAt, null, null, sheet = false) { }
+        var tab by remember { mutableStateOf(0) }
+        TabRow(selectedTabIndex = tab, modifier = Modifier.padding(top = 8.dp)) {
+            Tab(tab == 0, { tab = 0 }, text = { Text("Log") })
+            Tab(tab == 1, { tab = 1 }, text = { Text("Plan") })
+        }
+        if (tab == 0) {
+            ReminderCard(p)
+            MealPanel(openedAt, null, null, sheet = false) { }
+        } else {
+            PlanScreen()
+        }
         UpdateRow()
         Spacer(Modifier.height(32.dp))
     }

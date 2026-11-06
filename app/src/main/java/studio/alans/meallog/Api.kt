@@ -28,6 +28,7 @@ data class Food(val foodId: String, val name: String, val quantity: Double, val 
 data class Guess(val id: String, val label: String, val carbs: Int, val times: Int, val items: List<Food>)
 data class Logged(val time: String, val name: String, val carbs: Double)
 data class Guesses(val mealType: String, val guesses: List<Guess>, val today: List<Logged>)
+data class Plan(val text: String, val session: String?, val bolusInMin: Int?, val carbs: Double?, val summary: String)
 data class LogResult(val logged: List<String>, val entryIds: List<String>, val problems: List<String>)
 
 /** Your meal server (see the README for the API), optionally behind Cloudflare Access. */
@@ -91,6 +92,32 @@ class Api(c: Context) {
 
     suspend fun undo(ids: List<String>) {
         call(post("/undo", JSONObject().put("entry_ids", JSONArray(ids))))
+    }
+
+    /** Starts a meal plan (text and/or a JPEG); session continues an earlier one. Returns the job id. */
+    suspend fun plan(text: String, jpeg: ByteArray?, session: String?): String {
+        val j = JSONObject().put("text", text)
+        if (jpeg != null) j.put("image_b64", android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP))
+        if (session != null) j.put("session", session)
+        return call(post("/plan", j)).getString("job")
+    }
+
+    /** Waits for a plan job (it runs Claude, 20-60 s). */
+    suspend fun planResult(job: String): Plan {
+        while (true) {
+            val j = call(req("/plan/$job").build())
+            when (j.optString("state")) {
+                "done" -> {
+                    val x = j.optJSONObject("extras") ?: JSONObject()
+                    return Plan(j.optString("text"), j.optString("session").ifBlank { null },
+                        if (x.isNull("bolus_in_min")) null else x.optInt("bolus_in_min"),
+                        if (x.isNull("carbs")) null else x.optDouble("carbs"), x.optString("summary"))
+                }
+                "failed" -> throw RuntimeException(j.optString("error", "The planner failed"))
+                "unknown" -> throw RuntimeException("The server restarted, try again")
+            }
+            kotlinx.coroutines.delay(2500)
+        }
     }
 
     suspend fun skip(at: Long) {
