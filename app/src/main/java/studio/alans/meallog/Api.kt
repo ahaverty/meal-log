@@ -10,6 +10,10 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,7 +77,33 @@ class Api(c: Context) {
         return b
     }
 
-    private suspend fun call(r: Request): JSONObject = withContext(Dispatchers.IO) {
+    /** Phone signal blips (no DNS, no route) fail before anything is sent, so they are safe to retry
+     *  a few times; if they persist the error says what happened in plain words. */
+    private suspend fun call(r: Request): JSONObject {
+        var wait = 1000L
+        repeat(3) {
+            try {
+                return once(r)
+            } catch (e: UnknownHostException) {
+            } catch (e: ConnectException) {
+            }
+            kotlinx.coroutines.delay(wait)
+            wait *= 2
+        }
+        return try {
+            once(r)
+        } catch (e: UnknownHostException) {
+            throw RuntimeException("No internet right now (the phone couldn't look up the nutrition server). Check signal or Wi-Fi and try again.")
+        } catch (e: ConnectException) {
+            throw RuntimeException("Couldn't reach the nutrition server. Check signal or Wi-Fi and try again.")
+        } catch (e: SocketTimeoutException) {
+            throw RuntimeException("The nutrition server took too long to answer. Try again.")
+        } catch (e: IOException) {
+            throw RuntimeException("Network problem: ${e.message ?: e.javaClass.simpleName}. Try again.")
+        }
+    }
+
+    private suspend fun once(r: Request): JSONObject = withContext(Dispatchers.IO) {
         http.newCall(r).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw RuntimeException("Server said ${resp.code}" +
