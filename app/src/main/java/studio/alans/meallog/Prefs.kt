@@ -7,6 +7,15 @@ import android.content.SharedPreferences
 class Prefs(c: Context) {
     val p: SharedPreferences = c.getSharedPreferences("meallog", Context.MODE_PRIVATE)
 
+    init {
+        // A private build can come with its server settings baked in. Keep them as real settings,
+        // so they survive updating to the public GitHub build, which has none.
+        if (!p.contains("url") && BuildConfig.MEAL_URL.isNotBlank()) {
+            p.edit().putString("url", BuildConfig.MEAL_URL).putString("token", BuildConfig.MEAL_TOKEN)
+                .putString("cf_id", BuildConfig.CF_ID).putString("cf_secret", BuildConfig.CF_SECRET).apply()
+        }
+    }
+
     var url: String
         get() = p.getString("url", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.MEAL_URL
         set(v) = p.edit().putString("url", v.trim().trimEnd('/')).apply()

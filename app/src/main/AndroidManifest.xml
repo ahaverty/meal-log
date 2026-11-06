@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Self-update from the latest GitHub release (Android asks before installing). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Lets the meal sheet open over CamAPS straight after a bolus (Android blocks it otherwise). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- FX Watcher's optional bolus broadcast. -->
@@ -49,6 +51,11 @@
 
         <receiver
             android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <!-- Self-update install progress (asks the user to confirm). -->
+        <receiver
+            android:name=".Updater$InstallStatus"
             android:exported="false" />
 
         <receiver

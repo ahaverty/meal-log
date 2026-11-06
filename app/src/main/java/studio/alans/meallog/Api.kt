@@ -30,7 +30,7 @@ data class Logged(val time: String, val name: String, val carbs: Double)
 data class Guesses(val mealType: String, val guesses: List<Guess>, val today: List<Logged>)
 data class LogResult(val logged: List<String>, val entryIds: List<String>, val problems: List<String>)
 
-/** The meal-sync server on Alan's PC (meal_app.py), through the nutrition Cloudflare tunnel. */
+/** Your meal server (see the README for the API), optionally behind Cloudflare Access. */
 class Api(c: Context) {
     private val prefs = Prefs(c)
     private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)

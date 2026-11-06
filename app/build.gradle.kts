@@ -12,13 +12,10 @@ fun props(name: String) = Properties().apply {
 }
 
 val keystoreProps = props("keystore.properties")
-// Server settings baked into Alan's own build (secrets.properties is never committed); they can be
-// changed in the app's Settings too.
+// Optional: server settings baked into a private build (secrets.properties is never committed).
+// The public build has none; they are entered in the app's Settings.
 val secrets = props("secrets.properties")
 fun secret(k: String) = "\"" + (secrets.getProperty(k) ?: "").replace("\"", "") + "\""
-
-val commitCount = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
-    .standardOutput.asText.get().trim().toIntOrNull() ?: 1
 
 android {
     namespace = "studio.alans.meallog"
@@ -28,8 +25,9 @@ android {
         applicationId = "studio.alans.meallog"
         minSdk = 31
         targetSdk = 35
-        versionCode = 100 + commitCount
-        versionName = "0.$commitCount"
+        // A release = bump both, add a RELEASE_NOTES.md line, push a v* tag (CI publishes it).
+        versionCode = 103
+        versionName = "0.3.0"
         buildConfigField("String", "MEAL_URL", secret("MEAL_URL"))
         buildConfigField("String", "MEAL_TOKEN", secret("MEAL_TOKEN"))
         buildConfigField("String", "CF_ID", secret("CF_ID"))
@@ -38,7 +36,14 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystoreProps.isNotEmpty()) {
+            // CI: MEAL_KEYSTORE + MEAL_KEYSTORE_PASSWORD from repo secrets. Locally: keystore.properties.
+            val ciStore = System.getenv("MEAL_KEYSTORE")
+            if (!ciStore.isNullOrBlank()) {
+                storeFile = file(ciStore)
+                storePassword = System.getenv("MEAL_KEYSTORE_PASSWORD")
+                keyAlias = "meallog"
+                keyPassword = System.getenv("MEAL_KEYSTORE_PASSWORD")
+            } else if (keystoreProps.isNotEmpty()) {
                 storeFile = file(keystoreProps.getProperty("storeFile"))
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
@@ -52,7 +57,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("release")
+            if (!System.getenv("MEAL_KEYSTORE").isNullOrBlank() || keystoreProps.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

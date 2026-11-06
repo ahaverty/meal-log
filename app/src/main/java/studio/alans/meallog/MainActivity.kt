@@ -46,7 +46,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Home: log what you're eating now (guessed from the time of day), and the bolus reminder. */
 class MainActivity : ComponentActivity() {
@@ -81,9 +84,50 @@ private fun Home() {
         }
         ReminderCard(p)
         MealPanel(openedAt, null, null, sheet = false) { }
+        UpdateRow()
         Spacer(Modifier.height(32.dp))
     }
     if (settings) SettingsDialog(p) { settings = false }
+}
+
+/** Check for update / Install vX / Releases, like FX Watcher. Also checks quietly every 6 h on open. */
+@Composable
+private fun UpdateRow() {
+    val c = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var avail by remember { mutableStateOf(Updater.available(c)) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val act = c as? ComponentActivity
+    LaunchedEffect(Unit) {
+        Updater.check(c, force = false)
+        avail = Updater.available(c)
+        if (act?.intent?.action == Updater.ACTION_INSTALL && avail != null) msg = Updater.install(c)
+    }
+    Column(Modifier.padding(horizontal = 16.dp)) {
+        HorizontalDivider()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("v${Updater.installedName(c)}", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            val a = avail
+            if (a != null) {
+                TextButton(onClick = { msg = "Downloading the update…"; scope.launch { msg = Updater.install(c) } }) {
+                    Text("Install v${a.name}")
+                }
+            } else {
+                TextButton(onClick = {
+                    msg = "Checking…"
+                    scope.launch { msg = Updater.check(c, force = true); avail = Updater.available(c) }
+                }) { Text("Check for update") }
+            }
+            TextButton(onClick = { c.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.RELEASES))) }) {
+                Text("Releases")
+            }
+        }
+        msg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        avail?.notes?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable
