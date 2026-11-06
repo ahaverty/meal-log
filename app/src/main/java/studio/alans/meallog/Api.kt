@@ -62,7 +62,7 @@ data class LogResult(val logged: List<String>, val entryIds: List<String>, val p
 /** Your meal server (see the README for the API), optionally behind Cloudflare Access. */
 class Api(c: Context) {
     private val prefs = Prefs(c)
-    private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
+    private val http = OkHttpClient.Builder().connectTimeout(6, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS).build()
 
     fun configured() = prefs.url.isNotBlank() && prefs.token.isNotBlank()
@@ -86,6 +86,9 @@ class Api(c: Context) {
                 return once(r)
             } catch (e: UnknownHostException) {
             } catch (e: ConnectException) {
+            } catch (e: SocketTimeoutException) {
+                // Only a timeout while connecting is safe to repeat (nothing was sent yet).
+                if (!connectPhase(e)) throw RuntimeException("The nutrition server took too long to answer. Try again.")
             }
             kotlinx.coroutines.delay(wait)
             wait *= 2
@@ -97,11 +100,15 @@ class Api(c: Context) {
         } catch (e: ConnectException) {
             throw RuntimeException("Couldn't reach the nutrition server. Check signal or Wi-Fi and try again.")
         } catch (e: SocketTimeoutException) {
-            throw RuntimeException("The nutrition server took too long to answer. Try again.")
+            throw RuntimeException(if (connectPhase(e)) "Weak signal: couldn't connect to the nutrition server after a few tries. Try again when you have better signal or Wi-Fi."
+                else "The nutrition server took too long to answer. Try again.")
         } catch (e: IOException) {
             throw RuntimeException("Network problem: ${e.message ?: e.javaClass.simpleName}. Try again.")
         }
     }
+
+    private fun connectPhase(e: SocketTimeoutException): Boolean =
+        (e.message ?: "").let { it.startsWith("failed to connect", true) || it.contains("connect timed out", true) }
 
     private suspend fun once(r: Request): JSONObject = withContext(Dispatchers.IO) {
         http.newCall(r).execute().use { resp ->

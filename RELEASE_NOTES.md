@@ -7,6 +7,8 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
+**New in v0.7.3:** weak signal that times out while connecting ("failed to connect ... after 10000ms") is retried too, with a plain message if it still can't get through.
+
 **New in v0.7.2:** a brief loss of signal (like "Unable to resolve host") is retried for a few seconds before showing an error, and the error now says in plain words that the phone has no internet.
 
 **New in v0.7.1:** the plan over CamAPS starts in the empty space under Total Units, clear of the slider, Glucose, Carbs and Next. With FX Watcher 3.12.1, it shrinks to the "Bolus 15 g" pill when the Carbohydrates box and keyboard open, and comes back when you confirm.
