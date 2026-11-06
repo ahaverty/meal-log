@@ -17,6 +17,11 @@
     <!-- Android 11+ hides other apps unless declared here; Settings checks FX Watcher is installed. -->
     <queries>
         <package android:name="studio.alans.fxwatcher" />
+        <!-- "Open CamAPS" on a plan (any CamAPS FX build). -->
+        <package android:name="com.camdiab.fx_alert.mmoll" />
+        <package android:name="com.camdiab.fx_alert.hx.mmoll" />
+        <package android:name="com.camdiab.fx_alert.mgdl" />
+        <package android:name="com.camdiab.fx_alert.hx.mgdl" />
     </queries>
 
     <application

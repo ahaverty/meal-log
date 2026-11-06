@@ -33,6 +33,11 @@ class Prefs(c: Context) {
         get() = p.getInt("min_carbs", 10)
         set(v) = p.edit().putInt("min_carbs", v).apply()
 
+    /** Where the plan card over CamAPS sits (px from the top), -1 = default. */
+    var overlayY: Int
+        get() = p.getInt("overlay_y", -1)
+        set(v) = p.edit().putInt("overlay_y", v).apply()
+
     /** Last bolus FX Watcher told us about. */
     var lastBolusAt: Long
         get() = p.getLong("last_bolus_at", 0)

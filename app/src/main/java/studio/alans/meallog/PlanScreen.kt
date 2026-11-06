@@ -7,6 +7,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -155,7 +162,7 @@ fun PlanScreen(start: PlanStart?) {
         }
         OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = if (pl == null) 3 else 1,
             placeholder = {
-                Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos" else "Answer or correct it, e.g. thin bread, walking home")
+                Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos" else "Answer or change it, e.g. 30g bag, walking home")
             })
         if (pl == null) {
             Text("Eating", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
@@ -170,6 +177,7 @@ fun PlanScreen(start: PlanStart?) {
             Spacer(Modifier.weight(1f))
             Button(onClick = { send() }, enabled = text.isNotBlank() || photo != null) { Text(if (pl == null) "Plan it" else "Send") }
         }
+        if (pl != null) PlanDetails(pl)
     }
 }
 
@@ -187,37 +195,119 @@ private fun arm(c: android.content.Context, pl: Plan) {
 @Composable
 private fun PlanResult(pl: Plan, onNew: () -> Unit) {
     val c = LocalContext.current
-    val blocks = pl.text.split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
-    val entry = blocks.firstOrNull { it.startsWith("CamAPS", ignoreCase = true) } ?: blocks.firstOrNull().orEmpty()
-    val rest = blocks.filter { it != entry }
+    val cv = remember(pl) { Camaps.view(pl) }
+    var msg by remember { mutableStateOf<String?>(null) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleMedium, maxLines = 2,
-            modifier = Modifier.weight(1f))
+        Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+            maxLines = 2, modifier = Modifier.weight(1f))
         TextButton(onClick = onNew) { Text("New meal") }
     }
-    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-        Column(Modifier.padding(16.dp)) {
-            entry.lines().forEachIndexed { i, line ->
-                if (i == 0 && line.startsWith("CamAPS", true)) {
-                    Text(line, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                } else {
-                    Text(line, style = if (line.startsWith("(")) MaterialTheme.typography.bodySmall else MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(top = 4.dp))
+    val facts = listOfNotNull(cv.glucose?.let { "Glucose $it" }, cv.mealType?.let { "$it meal" })
+    if (facts.isNotEmpty()) {
+        Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    Card(Modifier.fillMaxWidth().padding(top = 10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.padding(vertical = 6.dp)) {
+            Text("IN CAMAPS", style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+            cv.steps.forEachIndexed { i, st ->
+                if (i > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                StepRow(i + 1, st)
+            }
+        }
+    }
+    Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(52.dp)) {
+        Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+    }
+    Text(msg ?: "The plan floats over CamAPS while you type it in. Drag it aside, tap it to close.",
+        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+        color = if (msg != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+
+    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 }
+    if (mine.isNotEmpty()) {
+        Text("Reminders", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+        mine.forEach { r -> ReminderRow(r) }
+    }
+
+    cv.question?.let { q ->
+        Card(Modifier.fillMaxWidth().padding(top = 14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("To firm it up", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer)
+                Text(q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer)
+            }
+        }
+    }
+}
+
+/** One CamAPS step: the menu words, the number to type (big), when, and a few words. */
+@Composable
+private fun StepRow(n: Int, st: CamapsStep) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+        Box(Modifier.size(26.dp).clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
+            Text("$n", color = cs.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(st.label, style = MaterialTheme.typography.titleSmall, color = cs.primary,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (st.kind != CamapsStep.Kind.Check && st.time != null) {
+                    Text(st.time, style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
+                }
+            }
+            when (st.kind) {
+                CamapsStep.Kind.Bolus, CamapsStep.Kind.AddMeal -> Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Carbs ", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                    Text(st.value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                }
+                CamapsStep.Kind.Other -> if (st.value.isNotBlank()) Text(st.value, style = MaterialTheme.typography.titleMedium)
+                else -> Text(st.value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
+            st.sub?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
+            if (st.ifText != null || st.thenText != null) {
+                Column(Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(cs.errorContainer).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    st.ifText?.let {
+                        Text("If " + it.replaceFirstChar { ch -> ch.lowercase() }, style = MaterialTheme.typography.labelLarge,
+                            color = cs.onErrorContainer)
+                    }
+                    st.thenText?.let {
+                        Text(it, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold,
+                            color = cs.onErrorContainer)
+                    }
                 }
             }
         }
     }
+}
 
-    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 }
-    if (mine.isNotEmpty()) {
-        Text("Reminders set", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))
-        mine.forEach { r -> ReminderRow(r) }
+/** The planner's reasoning (classification, breakdown, ratio note), folded away under the plan. */
+@Composable
+private fun PlanDetails(pl: Plan) {
+    val blocks = pl.text.replace("**", "").split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
+    val structured = (pl.camaps?.optJSONArray("steps")?.length() ?: 0) > 0
+    // With steps from the planner the "CamAPS entry" block is already shown above as steps.
+    val rest = if (structured) blocks.filterNot { it.startsWith("CamAPS", ignoreCase = true) } else blocks
+    if (rest.isEmpty()) return
+    var open by remember(pl) { mutableStateOf(!structured) }
+    TextButton(onClick = { open = !open }, modifier = Modifier.padding(top = 8.dp)) {
+        Text(if (open) "Hide breakdown" else "Breakdown and why")
     }
-
-    rest.forEach { b ->
-        Text(b, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 10.dp))
+    if (open) rest.forEach { b ->
+        Text(b, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp, start = 4.dp))
     }
 }
 
@@ -230,8 +320,8 @@ fun ReminderRow(r: Reminder) {
             Text(Api.hhmm(r.at), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.width(60.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (r.bolus) "Bolus" + (r.text.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "") else r.text,
-                    style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                Text(if (r.bolus) "Bolus" else r.text, style = MaterialTheme.typography.bodyLarge, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
                 if (r.bolus) Text("Cancels itself when you bolus", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
