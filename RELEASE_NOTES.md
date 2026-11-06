@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.5.0:** a tidier app with three pages. **Plan** (where it opens) has an "Eating now / in 10-45 min" choice and a full-size camera photo, and the plan now sets its own reminders: the bolus (it cancels itself when you bolus), a "did you bolus?" check when it says bolus now, and later steps such as Boost or the slow carbs, each with an X. **Log** opens by itself when a meal bolus isn't logged yet. **Reminders** lists what's coming up. Updates and the server moved into **Settings**, which also shows whether FX Watcher's boluses are getting through. Long-press the app icon for Plan, Photo, Log and "Bolus in 15 min", and `meallog://` links open any page.
+**New in v0.5.1:** fixed Settings saying "FX Watcher isn't installed" when it is (Android was hiding it from Meal Log).
+
+**v0.5.0:** a tidier app with three pages. **Plan** (where it opens) has an "Eating now / in 10-45 min" choice and a full-size camera photo, and the plan now sets its own reminders: the bolus (it cancels itself when you bolus), a "did you bolus?" check when it says bolus now, and later steps such as Boost or the slow carbs, each with an X. **Log** opens by itself when a meal bolus isn't logged yet. **Reminders** lists what's coming up. Updates and the server moved into **Settings**, which also shows whether FX Watcher's boluses are getting through. Long-press the app icon for Plan, Photo, Log and "Bolus in 15 min", and `meallog://` links open any page.
 
 **v0.4.0:** a **Plan** tab. Describe a meal, or photograph the plate or the menu, and get the CamAPS entry (bolus calculator and slowly absorbed carbs) and when to bolus, from your meal server's planner. Reply to correct it ("the bread was thin"). **Remind me to bolus in N min** sets the smart reminder, and after the bolus the sheet offers the planned meal first. Fixed: a one-tap log showed an error although it had logged.
 
