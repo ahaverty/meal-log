@@ -1,8 +1,10 @@
 package studio.alans.meallog
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -124,8 +126,11 @@ object Camaps {
  * when the card is in the way. Only the card or pill takes touches, so CamAPS works around it.
  * Card: drag to move, tap to close, "–" shrinks it to the pill. Pill: drag to move, tap to open
  * the card again. Positions are remembered. Goes by itself after 20 min.
- * It starts around the middle of the screen: CamAPS's tabs are at the top and Android's keyboard
- * draws over overlays at the bottom. Plain Views: Compose in an overlay window needs its own
+ * The card starts in the empty space under the calculator's Total Units (clear of the tabs, the
+ * Meal size slider, Glucose, Carbs, Total Units and Cancel/Next). When a CamAPS entry box opens
+ * (Carbohydrates with the keyboard, which Android draws over overlays), FX Watcher 3.12.1+ says
+ * so and the card turns into the pill in the gap between the box and the keyboard; it comes back
+ * when the box closes. Plain Views: Compose in an overlay window needs its own
  * lifecycle plumbing for no gain here.
  */
 object PlanOverlay {
@@ -134,11 +139,34 @@ object PlanOverlay {
     private var steps: CamapsView? = null
     private val main = Handler(Looper.getMainLooper())
     private val timeout = Runnable { hide() }
+    private var isPill = false
+    private var autoPill = false   // pill because an entry box is open, not because it was asked for
+    private var receiver: BroadcastReceiver? = null
 
     fun hide() {
         main.removeCallbacks(timeout)
         remove()
         steps = null
+        receiver?.let { r -> runCatching { shownCtx?.unregisterReceiver(r) } }
+        receiver = null
+    }
+
+    private var shownCtx: Context? = null
+
+    /** FX Watcher (read-only) says whether a CamAPS entry dialog is open. */
+    private fun listen(c: Context) {
+        if (receiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, i: Intent) {
+                if (steps == null) return
+                val dialog = i.getBooleanExtra("dialog", false)
+                if (dialog && !isPill) { pill(c); autoPill = true }
+                else if (!dialog && isPill && autoPill) card(c)
+            }
+        }
+        c.registerReceiver(r, IntentFilter("studio.alans.fxwatcher.action.CAMAPS_SCREEN"), Context.RECEIVER_EXPORTED)
+        receiver = r
+        shownCtx = c
     }
 
     private fun remove() {
@@ -152,6 +180,7 @@ object PlanOverlay {
         this.title = title
         steps = cv
         card(c)
+        runCatching { listen(c) }
         main.postDelayed(timeout, 20 * 60_000L)
     }
 
@@ -167,7 +196,7 @@ object PlanOverlay {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or (if (pill) Gravity.END else Gravity.CENTER_HORIZONTAL)
-            y = saved.takeIf { it >= 0 } ?: (h * if (pill) 0.30f else 0.38f).toInt()
+            y = saved.takeIf { it >= 0 } ?: (h * if (pill) 0.49f else 0.585f).toInt()
             horizontalMargin = 0.03f
         }
     }
@@ -205,6 +234,7 @@ object PlanOverlay {
     private fun card(c: Context) {
         remove()
         val cv = steps ?: return
+        isPill = false; autoPill = false
         val wm = c.getSystemService(WindowManager::class.java)
         val dp = c.resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
@@ -263,6 +293,7 @@ object PlanOverlay {
     private fun pill(c: Context) {
         remove()
         val cv = steps ?: return
+        isPill = true; autoPill = false
         val wm = c.getSystemService(WindowManager::class.java)
         val dp = c.resources.displayMetrics.density
         val first = cv.steps.firstOrNull { it.kind == CamapsStep.Kind.Bolus } ?: cv.steps.firstOrNull()

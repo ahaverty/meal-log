@@ -7,6 +7,8 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
+**New in v0.7.1:** the plan over CamAPS starts in the empty space under Total Units, clear of the slider, Glucose, Carbs and Next. With FX Watcher 3.12.1, it shrinks to the "Bolus 15 g" pill when the Carbohydrates box and keyboard open, and comes back when you confirm.
+
 **New in v0.7.0:** a bolus that matches your plan (carbs within 5 g or 20%, within 45 min of the planned time) logs the planned meal by itself, with a notification to fix it if wrong. The plan over CamAPS starts mid-screen, is more compact, and shrinks to a small pill with "–". With FX Watcher 3.12's opt-in setting, CamAPS opens straight on the Bolus tab.
 
 **New in v0.6.0:** the Plan page shows the plan as numbered CamAPS steps in CamAPS's own words (Bolus, Add meal, Boost, check glucose and what to do if low), and "Open CamAPS with this plan" floats the steps over CamAPS while you type them in.

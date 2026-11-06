@@ -33,13 +33,13 @@ class Prefs(c: Context) {
         get() = p.getInt("min_carbs", 10)
         set(v) = p.edit().putInt("min_carbs", v).apply()
 
-    /** Where the plan card / pill over CamAPS sit (px from the top), -1 = default (mid-screen). */
+    /** Where the plan card / pill over CamAPS sit (px from the top), -1 = default (under Total Units / between box and keyboard). */
     var overlayY: Int
-        get() = p.getInt("overlay_card_y", -1)
-        set(v) = p.edit().putInt("overlay_card_y", v).apply()
+        get() = p.getInt("overlay_card_y2", -1)
+        set(v) = p.edit().putInt("overlay_card_y2", v).apply()
     var overlayPillY: Int
-        get() = p.getInt("overlay_pill_y", -1)
-        set(v) = p.edit().putInt("overlay_pill_y", v).apply()
+        get() = p.getInt("overlay_pill_y2", -1)
+        set(v) = p.edit().putInt("overlay_pill_y2", v).apply()
 
     /** Last bolus FX Watcher told us about. */
     var lastBolusAt: Long
