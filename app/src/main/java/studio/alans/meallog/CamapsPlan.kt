@@ -111,89 +111,74 @@ object Camaps {
             return "Allow Meal Log to display over other apps, then tap again"
         }
         PlanOverlay.show(c.applicationContext, pl.asked.lines().first(), view(pl))
+        // FX Watcher (3.12+, if its "Open the Bolus tab when an app asks" is on) taps CamAPS's
+        // Bolus tab once, so the calculator is open. Ignored otherwise.
+        c.sendBroadcast(Intent("studio.alans.fxwatcher.action.OPEN_BOLUS_TAB").setPackage("studio.alans.fxwatcher"))
         c.startActivity(c.packageManager.getLaunchIntentForPackage(pkg)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return null
     }
 }
 
 /**
- * A card over CamAPS with the steps to type in. Only the card takes touches, so CamAPS works
- * normally around it. Drag to move it out of the way, tap to dismiss. Goes by itself after 20 min.
- * Plain Views: Compose in an overlay window needs its own lifecycle plumbing for no gain here.
+ * The plan over CamAPS. Two sizes: the card (every step) and a pill (just the bolus grams) for
+ * when the card is in the way. Only the card or pill takes touches, so CamAPS works around it.
+ * Card: drag to move, tap to close, "–" shrinks it to the pill. Pill: drag to move, tap to open
+ * the card again. Positions are remembered. Goes by itself after 20 min.
+ * It starts around the middle of the screen: CamAPS's tabs are at the top and Android's keyboard
+ * draws over overlays at the bottom. Plain Views: Compose in an overlay window needs its own
+ * lifecycle plumbing for no gain here.
  */
 object PlanOverlay {
     private var shown: View? = null
+    private var title = ""
+    private var steps: CamapsView? = null
     private val main = Handler(Looper.getMainLooper())
     private val timeout = Runnable { hide() }
 
     fun hide() {
         main.removeCallbacks(timeout)
+        remove()
+        steps = null
+    }
+
+    private fun remove() {
         val v = shown ?: return
         shown = null
         runCatching { v.context.getSystemService(WindowManager::class.java).removeView(v) }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     fun show(c: Context, title: String, cv: CamapsView) {
-        hide()
-        val wm = c.getSystemService(WindowManager::class.java)
-        val dp = c.resources.displayMetrics.density
-        fun px(v: Int) = (v * dp).toInt()
-        fun text(s: String, sp: Float, color: Int, bold: Boolean = false) = TextView(c).apply {
-            text = s; setTextSize(TypedValue.COMPLEX_UNIT_SP, sp); setTextColor(color)
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-        }
-        val white = Color.WHITE
-        val dim = Color.parseColor("#B8C4D6")
-        val accent = Color.parseColor("#8FD3FF")
+        main.removeCallbacks(timeout)
+        this.title = title
+        steps = cv
+        card(c)
+        main.postDelayed(timeout, 20 * 60_000L)
+    }
 
-        val card = LinearLayout(c).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(px(16), px(12), px(16), px(12))
-            background = GradientDrawable().apply { cornerRadius = 20 * dp; setColor(Color.parseColor("#F2182235")) }
-            elevation = 12 * dp
-        }
-        card.addView(LinearLayout(c).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(text(title, 13f, dim).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
-                LinearLayout.LayoutParams(0, -2, 1f))
-            addView(text("Tap to close", 12f, dim))
-        })
-        cv.steps.forEachIndexed { i, st ->
-            val row = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(0, px(if (i == 0) 6 else 10), 0, 0) }
-            row.addView(LinearLayout(c).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.BOTTOM
-                addView(text("${i + 1}  ${st.label}", 15f, accent, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
-                if (st.kind != CamapsStep.Kind.Check && st.time != null) addView(text(st.time, 14f, dim))
-            })
-            val big = when (st.kind) {
-                CamapsStep.Kind.Bolus, CamapsStep.Kind.AddMeal -> "Carbs  ${st.value}"
-                else -> st.value
-            }
-            if (big.isNotBlank()) row.addView(text(big, 26f, white, bold = true))
-            st.sub?.let { row.addView(text(it, 13f, dim)) }
-            if (st.ifText != null || st.thenText != null) {
-                row.addView(text(listOfNotNull(st.ifText, st.thenText).joinToString(" → "), 14f, Color.parseColor("#FFB4A8")))
-            }
-            card.addView(row)
-        }
-
-        val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+    private fun params(c: Context, pill: Boolean): WindowManager.LayoutParams {
+        val p = Prefs(c)
+        val h = c.resources.displayMetrics.heightPixels
+        val saved = if (pill) p.overlayPillY else p.overlayY
+        return WindowManager.LayoutParams(
+            if (pill) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP
-            y = Prefs(c).overlayY.takeIf { it >= 0 } ?: px(56)
+            gravity = Gravity.TOP or (if (pill) Gravity.END else Gravity.CENTER_HORIZONTAL)
+            y = saved.takeIf { it >= 0 } ?: (h * if (pill) 0.30f else 0.38f).toInt()
             horizontalMargin = 0.03f
         }
+    }
 
-        // Drag moves it (and it stays there next time); a tap closes it.
+    /** Drag moves the window (and remembers where); a tap without a drag calls onTap. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun movable(c: Context, v: View, lp: WindowManager.LayoutParams, pill: Boolean, onTap: () -> Unit) {
+        val wm = c.getSystemService(WindowManager::class.java)
         val slop = ViewConfiguration.get(c).scaledTouchSlop
         var downY = 0f; var startY = 0; var dragging = false
-        card.setOnTouchListener { _, e ->
+        v.setOnTouchListener { _, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { downY = e.rawY; startY = lp.y; dragging = false }
                 MotionEvent.ACTION_MOVE -> {
@@ -201,15 +186,96 @@ object PlanOverlay {
                     if (dragging || abs(dy) > slop) {
                         dragging = true
                         lp.y = (startY + dy).toInt().coerceAtLeast(0)
-                        runCatching { wm.updateViewLayout(card, lp) }
+                        runCatching { wm.updateViewLayout(v, lp) }
                     }
                 }
-                MotionEvent.ACTION_UP -> if (dragging) Prefs(c).overlayY = lp.y else hide()
+                MotionEvent.ACTION_UP -> if (dragging) {
+                    if (pill) Prefs(c).overlayPillY = lp.y else Prefs(c).overlayY = lp.y
+                } else onTap()
             }
             true
         }
+    }
+
+    private fun text(c: Context, s: String, sp: Float, color: Int, bold: Boolean = false) = TextView(c).apply {
+        text = s; setTextSize(TypedValue.COMPLEX_UNIT_SP, sp); setTextColor(color)
+        if (bold) typeface = Typeface.DEFAULT_BOLD
+    }
+
+    private fun card(c: Context) {
+        remove()
+        val cv = steps ?: return
+        val wm = c.getSystemService(WindowManager::class.java)
+        val dp = c.resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+        val white = Color.WHITE
+        val dim = Color.parseColor("#B8C4D6")
+        val accent = Color.parseColor("#8FD3FF")
+
+        val card = LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(14), px(8), px(6), px(10))
+            background = GradientDrawable().apply { cornerRadius = 18 * dp; setColor(Color.parseColor("#F2182235")) }
+            elevation = 12 * dp
+        }
+        val lp = params(c, pill = false)
+        card.addView(LinearLayout(c).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(text(c, "$title · tap to close", 12f, dim).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            // Shrink to the pill. Its own touch handling, so it isn't a "tap to close".
+            addView(text(c, "–", 22f, white, bold = true).apply {
+                setPadding(px(16), 0, px(10), 0)
+                contentDescription = "Make smaller"
+                setOnClickListener { pill(c) }
+            })
+        })
+        cv.steps.forEachIndexed { i, st ->
+            val row = LinearLayout(c).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, px(if (i == 0) 2 else 6), px(8), 0)
+            }
+            val left = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+            left.addView(text(c, "${i + 1}  ${st.label}", 14f, accent, bold = true))
+            val sub = listOfNotNull(
+                st.sub,
+                if (st.ifText != null || st.thenText != null) listOfNotNull(st.ifText, st.thenText).joinToString(" → ") else null,
+            ).joinToString(" · ")
+            if (sub.isNotBlank()) left.addView(text(c, sub, 12f,
+                if (st.thenText != null) Color.parseColor("#FFB4A8") else dim).apply { maxLines = 2 })
+            row.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
+            val big = when (st.kind) {
+                CamapsStep.Kind.Bolus, CamapsStep.Kind.AddMeal -> st.value
+                CamapsStep.Kind.Other -> ""
+                else -> st.value
+            }
+            if (big.isNotBlank()) row.addView(text(c, big, 24f, white, bold = true).apply { setPadding(px(10), 0, 0, 0) })
+            card.addView(row)
+        }
+        movable(c, card, lp, pill = false) { hide() }
         wm.addView(card, lp)
         shown = card
-        main.postDelayed(timeout, 20 * 60_000L)
+    }
+
+    private fun pill(c: Context) {
+        remove()
+        val cv = steps ?: return
+        val wm = c.getSystemService(WindowManager::class.java)
+        val dp = c.resources.displayMetrics.density
+        val first = cv.steps.firstOrNull { it.kind == CamapsStep.Kind.Bolus } ?: cv.steps.firstOrNull()
+        val label = first?.let { if (it.kind == CamapsStep.Kind.Bolus) "Bolus ${it.value}" else it.label } ?: "Plan"
+        val pill = text(c, "$label  ▾", 16f, Color.WHITE, bold = true).apply {
+            setPadding((14 * dp).toInt(), (8 * dp).toInt(), (14 * dp).toInt(), (8 * dp).toInt())
+            background = GradientDrawable().apply { cornerRadius = 40 * dp; setColor(Color.parseColor("#F2182235")) }
+            elevation = 10 * dp
+            contentDescription = "Meal plan, tap to open"
+        }
+        val lp = params(c, pill = true)
+        movable(c, pill, lp, pill = true) { card(c) }
+        wm.addView(pill, lp)
+        shown = pill
     }
 }

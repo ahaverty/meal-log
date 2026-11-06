@@ -28,6 +28,8 @@ class BolusReceiver : BroadcastReceiver() {
         if (!p.askAfterBolus || carbs == null || carbs < p.minCarbs) return
         if (p.handledBolus == at) return
         p.handledBolus = at
+        // Matches the meal planned in the Plan tab: log it without asking.
+        if (PlanAutoLog.tryLog(c, at, carbs) { goAsync() }) return
         open(c, at, units, carbs)
     }
 
