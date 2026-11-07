@@ -29,6 +29,17 @@ import androidx.compose.ui.unit.dp
  * area above it or Back. It closes itself after logging.
  */
 class SheetActivity : ComponentActivity() {
+    private var handled = false
+
+    /** Closed without logging (Not now, X, Back, the dim area): ask again in 30 min, firmly. */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing && !handled) {
+            val at = intent.getLongExtra("at", 0)
+            if (at > 0 && Prefs(this).loggedBolus != at) Reminders.logLater(this, at, intent.getDoubleExtra("carbs", 0.0))
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getSystemService(NotificationManager::class.java).cancel(Notify.SHEET)
@@ -47,7 +58,7 @@ class SheetActivity : ComponentActivity() {
                         tonalElevation = 3.dp,
                     ) {
                         Box(Modifier.navigationBarsPadding().verticalScroll(rememberScrollState())) {
-                            MealPanel(at, carbs, units, sheet = true) { finish() }
+                            MealPanel(at, carbs, units, sheet = true) { handled = it; finish() }
                         }
                     }
                 }

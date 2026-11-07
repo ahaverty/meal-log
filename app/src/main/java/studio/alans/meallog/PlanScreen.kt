@@ -134,7 +134,7 @@ fun PlanScreen(start: PlanStart?) {
                 api.planResult(api.plan(t, img?.let(::jpeg), previous?.session, if (previous == null) eatIn else null),
                     if (previous == null) asking!! else previous.asked + "\n" + asking!!)
             }.onSuccess { pl ->
-                if (previous != null) Reminders.all(c).filter { it.setAt >= previous.madeAt - 5000 }.forEach { Reminders.cancel(c, it.id) }
+                if (previous != null) Reminders.open(c).filter { it.setAt >= previous.madeAt - 5000 }.forEach { Reminders.cancel(c, it.id) }
                 arm(c, pl)
                 plan = pl; field = TextFieldValue(""); photo = null
                 p.planJson = pl.json().toString(); p.planAt = pl.madeAt
@@ -240,7 +240,7 @@ private fun arm(c: android.content.Context, pl: Plan) {
         if (b > 0) Reminders.add(c, b, what, bolus = true)
         else Reminders.add(c, 10, "$what (did you bolus?)", bolus = true)
     }
-    pl.steps.forEach { Reminders.add(c, it.inMin, it.text, bolus = false) }
+    pl.steps.forEach { Reminders.add(c, it.inMin, it.text, bolus = false, cond = it.cond ?: GlucoseCheck.parse(it.text)) }
 }
 
 @Composable
@@ -281,7 +281,7 @@ private fun PlanResult(pl: Plan) {
         color = if (msg != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
 
-    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 }
+    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 && it.meal == 0L }
     if (mine.isNotEmpty()) {
         Text("Reminders", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
         mine.forEach { r -> ReminderRow(r) }
@@ -419,21 +419,58 @@ private fun PlanDetails(pl: Plan) {
 }
 
 @Composable
-fun ReminderRow(r: Reminder) {
+fun ReminderRow(r: Reminder, now: Long = System.currentTimeMillis()) {
     val c = LocalContext.current
+    val closed = !r.open
     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Row(Modifier.padding(start = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        colors = CardDefaults.cardColors(containerColor = when {
+            r.state == Reminder.MISSED -> MaterialTheme.colorScheme.errorContainer
+            closed -> MaterialTheme.colorScheme.surfaceContainer
+            else -> MaterialTheme.colorScheme.secondaryContainer
+        })) {
+        Row(Modifier.padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = if (closed) 16.dp else 0.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             Text(Api.hhmm(r.at), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.width(60.dp))
+                modifier = Modifier.width(60.dp),
+                color = if (closed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer)
             Column(Modifier.weight(1f)) {
-                Text(if (r.bolus) "Bolus" else r.text, style = MaterialTheme.typography.bodyLarge, maxLines = 2,
-                    overflow = TextOverflow.Ellipsis)
-                if (r.bolus) Text("Cancels itself when you bolus", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(Reminders.title(r), style = MaterialTheme.typography.bodyLarge, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (closed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(status(r, now), style = MaterialTheme.typography.bodySmall,
+                    color = if (r.state == Reminder.MISSED) MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = { Reminders.cancel(c, r.id) }) { Icon(Icons.Default.Close, "Cancel reminder") }
+            if (!closed) {
+                TextButton(onClick = { Reminders.close(c, r.id, Reminder.DONE) }) { Text("Done") }
+                IconButton(onClick = { Reminders.close(c, r.id, Reminder.SKIPPED) }) { Icon(Icons.Default.Close, "Skip") }
+            }
         }
+    }
+}
+
+/** One line under a reminder: what it waits for, or how it ended. */
+fun status(r: Reminder, now: Long = System.currentTimeMillis()): String = when (r.state) {
+    Reminder.DONE -> "Done" + (r.note.takeIf { it.isNotBlank() }?.let { ", $it" } ?: " ${Api.hhmm(r.closedAt)}")
+    Reminder.SKIPPED -> if (r.note.startsWith("not needed")) "Didn't ring: ${r.note.removePrefix("not needed, ")}"
+        else "Skipped" + (r.note.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+    Reminder.MISSED -> "Missed" + (r.note.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+    else -> when {
+        r.at <= now -> "Ringing every ${Reminders.NAG_MIN} min until you tap Done"
+        r.bolus -> "Cancels itself when you bolus"
+        r.meal != 0L -> "Closes itself when the food is logged"
+        r.check != null -> "Only rings if glucose is ${r.check!!.say()}"
+        else -> "In ${left(r.at - now)}"
+    }
+}
+
+/** 3 h 05 min / 12 min / 45 s */
+fun left(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return when {
+        s >= 3600 -> "%d h %02d min".format(s / 3600, (s % 3600) / 60)
+        s >= 60 -> "${(s + 59) / 60} min"
+        else -> "$s s"
     }
 }
 

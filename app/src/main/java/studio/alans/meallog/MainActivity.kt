@@ -51,6 +51,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 enum class Page(val title: String) { Plan("Plan a meal"), Log("Log food"), Reminders("Reminders"), Settings("Settings") }
 
@@ -104,8 +118,8 @@ class MainActivity : ComponentActivity() {
 private fun App(route: Route, go: (Route) -> Unit) {
     val c = LocalContext.current
     val page = route.page
-    val reminders = run { Reminders.version.collectAsState().value; Reminders.all(c) }
-    LaunchedEffect(Unit) { Updater.check(c, force = false) }   // quiet; shows as a notification + in Settings
+    val reminders = run { Reminders.version.collectAsState().value; Reminders.open(c) }
+    LaunchedEffect(Unit) { Reminders.sweep(c); Updater.check(c, force = false) }   // quiet; shows as a notification + in Settings
     BackHandler(page == Page.Settings) { go(Route(Page.Plan)) }
 
     Scaffold(
@@ -134,7 +148,7 @@ private fun App(route: Route, go: (Route) -> Unit) {
                     }, label = { Text("Log") })
                 NavigationBarItem(page == Page.Reminders, { go(Route(Page.Reminders)) },
                     icon = {
-                        BadgedBox(badge = { if (reminders.isNotEmpty()) Badge { Text("${reminders.size}") } }) {
+                        BadgedBox(badge = { if (reminders.isNotEmpty()) Badge { Text("${reminders.size}") } }) {   // open ones only
                             Icon(painterResource(R.drawable.sc_alarm), null)
                         }
                     }, label = { Text("Reminders") })
@@ -184,28 +198,95 @@ private fun LogPage() {
 private fun RemindersPage(list: List<Reminder>) {
     val c = LocalContext.current
     var note by remember { mutableStateOf("") }
+    var bolus by remember { mutableStateOf(true) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000L - now % 1000L) } }
+    val earlier = run { Reminders.version.collectAsState().value; Reminders.earlier(c, now) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        if (list.isEmpty()) {
+        val ringing = list.filter { it.at <= now }
+        val next = ringing.firstOrNull() ?: list.firstOrNull()
+        if (next == null) {
             Text("Nothing coming up.", style = MaterialTheme.typography.bodyLarge)
-            Text("Plans set their own reminders. Bolus reminders cancel themselves when FX Watcher sees the bolus.",
+            Text("Plans set their own reminders. Each one rings until you tap Done; checks with a glucose condition only ring if your glucose says so.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            list.forEach { ReminderRow(it) }
+            TimerCard(next, now)
+            val rest = list.filter { it.id != next.id }
+            if (rest.isNotEmpty()) {
+                Text("Up next", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 16.dp, bottom = 2.dp))
+                rest.forEach { ReminderRow(it, now) }
+            }
         }
         Spacer(Modifier.height(20.dp))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
-                Text("Remind me to bolus", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Ordered, eating soon? It rings only if you haven't bolused by then.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("New timer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    placeholder = { Text("What for? (optional)") }, singleLine = true)
+                    placeholder = { Text(if (bolus) "What for? (optional)" else "What? e.g. dinner ready") }, singleLine = true)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(5, 10, 15, 20, 30).forEach { m ->
-                        FilledTonalButton(onClick = { Reminders.add(c, m, note.trim(), bolus = true); note = "" }) { Text("$m min") }
+                    FilterChip(bolus, { bolus = true }, label = { Text("Bolus (cancels when I bolus)") })
+                    FilterChip(!bolus, { bolus = false }, label = { Text("Plain timer") })
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(5, 10, 15, 20, 30, 45, 60).forEach { m ->
+                        FilledTonalButton(onClick = {
+                            Reminders.add(c, m, note.trim().ifEmpty { if (bolus) "" else "Timer" }, bolus = bolus); note = ""
+                        }) { Text("$m min") }
                     }
                 }
             }
         }
+        if (earlier.isNotEmpty()) {
+            Text("Earlier", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 20.dp, bottom = 2.dp))
+            earlier.forEach { ReminderRow(it, now) }
+        }
     }
+}
+
+/** The next reminder as a big clock-app timer: ring counting down, Done / +5 min / Skip. */
+@Composable
+private fun TimerCard(r: Reminder, now: Long) {
+    val c = LocalContext.current
+    val over = r.at <= now
+    val total = (r.at - r.setAt).coerceAtLeast(1L)
+    val frac = if (over) 1f else ((r.at - now).toFloat() / total).coerceIn(0f, 1f)
+    val ring = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+        containerColor = if (over) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(240.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val w = 14.dp.toPx()
+                    val inset = w / 2
+                    val sz = androidx.compose.ui.geometry.Size(size.width - w, size.height - w)
+                    val tl = androidx.compose.ui.geometry.Offset(inset, inset)
+                    drawArc(track, 0f, 360f, false, tl, sz, style = Stroke(w))
+                    drawArc(ring, -90f, 360f * frac, false, tl, sz, style = Stroke(w, cap = StrokeCap.Round))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (over) Text("LATE", style = MaterialTheme.typography.labelLarge, color = ring, letterSpacing = 2.sp)
+                    Text(clock(if (over) now - r.at else r.at - now), fontSize = 52.sp, fontWeight = FontWeight.Light,
+                        fontFamily = FontFamily.Monospace, color = if (over) ring else MaterialTheme.colorScheme.onSurface)
+                    Text((if (over) "was due " else "rings at ") + Api.hhmm(r.at), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(Reminders.title(r), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+            Text(status(r, now), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { Reminders.close(c, r.id, Reminder.SKIPPED) }, Modifier.weight(1f)) { Text("Skip") }
+                OutlinedButton(onClick = { Reminders.snooze(c, r.id) }, Modifier.weight(1f)) { Text("+5 min") }
+                Button(onClick = { Reminders.close(c, r.id, Reminder.DONE) }, Modifier.weight(1.3f)) { Text("Done") }
+            }
+        }
+    }
+}
+
+/** 19:42 / 1:05:09 */
+private fun clock(ms: Long): String {
+    val s = (ms + 999) / 1000
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
 }

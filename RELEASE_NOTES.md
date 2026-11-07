@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.8.2:** tidier Plan page. Softer hint text and a clear (X) button in the box, a big "Plan a new meal" button under a plan, and an old plan now clears itself an hour after you eat (it used to stay 3 h).
+**New in v0.9.0:** reminders you can trust. The next one is a big countdown timer on the Reminders page and a live countdown in the notification shade. Each reminder rings until you tap Done, again every 5 min (louder from the third ring); unanswered after 4 rings it is marked missed and says so. Anything left over 2 h past its time is closed as missed on its own, and Earlier shows what was done, skipped or missed. Checks like "check glucose if under 5 and falling" read your live glucose first and only ring if it's true. With FX Watcher 3.13: a hypo treatment entered in CamAPS is logged as a glucose shot without asking, a meal or snack entered without a bolus opens the log sheet (put it off and it keeps reminding you until it's logged), and a "start Ease-off" reminder closes itself when CamAPS shows it started. New timer box for plain timers like dinner.
+
+**v0.8.2:** tidier Plan page. Softer hint text and a clear (X) button in the box, a big "Plan a new meal" button under a plan, and an old plan now clears itself an hour after you eat (it used to stay 3 h).
 
 **New in v0.8.1:** each menu pick has Have this and Change it. Change it puts the order in the box so you only type the difference (a different side, no sauce). After any plan you can still reply with a change and it re-plans.
 

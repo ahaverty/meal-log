@@ -26,8 +26,8 @@ android {
         minSdk = 31
         targetSdk = 35
         // A release = bump both, add a RELEASE_NOTES.md line, push a v* tag (CI publishes it).
-        versionCode = 114
-        versionName = "0.8.2"
+        versionCode = 115
+        versionName = "0.9.0"
         buildConfigField("String", "MEAL_URL", secret("MEAL_URL"))
         buildConfigField("String", "MEAL_TOKEN", secret("MEAL_TOKEN"))
         buildConfigField("String", "CF_ID", secret("CF_ID"))

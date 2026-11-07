@@ -83,7 +83,7 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
 
     val pr = remember { Prefs(c) }
     var tapped by remember { mutableStateOf<List<Food>>(emptyList()) }
-    fun markLogged() { if (at == pr.lastBolusAt) pr.loggedBolus = at }
+    fun markLogged() { if (at == pr.lastBolusAt) pr.loggedBolus = at; Reminders.mealLogged(c, at) }
 
     fun log(items: List<Food>) {
         busy = true
@@ -248,7 +248,7 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
             Spacer(Modifier.height(8.dp))
             Row {
                 TextButton(onClick = {
-                    scope.launch { runCatching { api.skip(at) }; onDone(true) }
+                    scope.launch { runCatching { api.skip(at) }; Reminders.mealLogged(c, at); onDone(true) }
                 }) { Text("Nothing to log") }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { onDone(false) }) { Text("Not now") }

@@ -14,72 +14,179 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Timed reminders. A bolus reminder ("bolus for the sandwich at 10:35") rings like an alarm, but
- * only if no bolus came in since it was set: FX Watcher's broadcast cancels it quietly. Other
- * reminders from a plan (start Boost, enter the slow carbs) ring once as a loud notification.
+ * Timed reminders that track whether they were done.
+ *
+ * A reminder is "due" until it is closed: done (tapped Done, or for a bolus reminder FX Watcher saw
+ * the bolus), skipped, or missed. When its time comes it rings, then rings again every 5 minutes
+ * (louder from the third ring) until he answers. Unanswered after [NAG_MAX] rings it is closed as
+ * missed, with one notification that says so. Anything still open [STALE_MS] after its time (phone
+ * off, app killed) is closed as missed too, so last night's reminders never hang around.
+ * Closed reminders show under "Earlier" for a day and are dropped after [KEEP_MS].
+ *
+ * The next reminder also sits in the notification shade as a live countdown, like a clock timer.
  */
-data class Reminder(val id: Int, val at: Long, val text: String, val bolus: Boolean, val setAt: Long) {
-    fun json(): JSONObject = JSONObject().put("id", id).put("at", at).put("text", text).put("bolus", bolus).put("set_at", setAt)
+data class Reminder(
+    val id: Int, val at: Long, val text: String, val bolus: Boolean, val setAt: Long,
+    val state: String = DUE, val closedAt: Long = 0, val rings: Int = 0, val note: String = "",
+    /** A meal to log: its time (ms), 0 for other reminders. */
+    val meal: Long = 0, val mealCarbs: Double = 0.0,
+    /** Ring only if glucose agrees: {"below":5,"above":null,"trend":"falling"}; "" = always ring. */
+    val cond: String = "",
+) {
+    val open get() = state == DUE
+    val check: GlucoseCheck? get() = GlucoseCheck.of(cond)
+
+    fun json(): JSONObject = JSONObject().put("id", id).put("at", at).put("text", text).put("bolus", bolus)
+        .put("set_at", setAt).put("state", state).put("closed_at", closedAt).put("rings", rings).put("note", note)
+        .put("meal", meal).put("meal_carbs", mealCarbs).put("cond", cond)
 
     companion object {
-        fun of(j: JSONObject) = Reminder(j.getInt("id"), j.getLong("at"), j.optString("text"), j.optBoolean("bolus"), j.optLong("set_at"))
+        const val DUE = "due"
+        const val DONE = "done"
+        const val SKIPPED = "skipped"
+        const val MISSED = "missed"
+
+        fun of(j: JSONObject) = Reminder(j.getInt("id"), j.getLong("at"), j.optString("text"), j.optBoolean("bolus"),
+            j.optLong("set_at"), j.optString("state", DUE).ifBlank { DUE }, j.optLong("closed_at"), j.optInt("rings"),
+            j.optString("note"), j.optLong("meal"), j.optDouble("meal_carbs", 0.0), j.optString("cond"))
     }
 }
 
 object Reminders {
-    private const val ACTION_RING = "studio.alans.meallog.RING"
+    const val ACTION_RING = "studio.alans.meallog.RING"
     private const val ACTION_DONE = "studio.alans.meallog.DONE"
     private const val ACTION_SNOOZE = "studio.alans.meallog.SNOOZE"
+    private const val ACTION_SKIP = "studio.alans.meallog.SKIP"
     private const val CH_BOLUS = "bolus_reminder"
     private const val CH_STEP = "plan_step"
+    private const val CH_TIMER = "countdown"
+    private const val CH_MISSED = "missed"
+    const val TIMER_ID = 999
+
+    const val NAG_MIN = 5
+    const val NAG_MAX = 4                    // rings at 0, 5, 10, 15 min; missed at 20
+    private const val STALE_MS = 2 * 3600_000L
+    private const val KEEP_MS = 3 * 24 * 3600_000L
+    private const val TIMER_AHEAD_MS = 6 * 3600_000L
 
     /** Changes to the list, for the screens that show it. */
     val version = kotlinx.coroutines.flow.MutableStateFlow(0)
 
+    /** Everything, open and closed, oldest first. */
     fun all(c: Context): List<Reminder> {
         val raw = Prefs(c).p.getString("reminders", "[]") ?: "[]"
         return runCatching { JSONArray(raw).let { a -> (0 until a.length()).map { Reminder.of(a.getJSONObject(it)) } } }
             .getOrDefault(emptyList()).sortedBy { it.at }
     }
 
+    /** Still to do, soonest first. */
+    fun open(c: Context) = all(c).filter { it.open }
+
+    /** Closed in the last day, newest first. */
+    fun earlier(c: Context, now: Long = System.currentTimeMillis()) =
+        all(c).filter { !it.open && now - it.closedAt < 24 * 3600_000L }.sortedByDescending { it.at }
+
     private fun save(c: Context, list: List<Reminder>) {
-        Prefs(c).p.edit().putString("reminders", JSONArray().apply { list.forEach { put(it.json()) } }.toString()).apply()
+        val now = System.currentTimeMillis()
+        val kept = list.filter { it.open || now - it.closedAt < KEEP_MS }
+        Prefs(c).p.edit().putString("reminders", JSONArray().apply { kept.forEach { put(it.json()) } }.toString()).apply()
         version.value++
+        timer(c)
     }
 
-    fun add(c: Context, inMin: Int, text: String, bolus: Boolean): Reminder {
+    private fun update(c: Context, id: Int, f: (Reminder) -> Reminder): Reminder? {
+        val list = all(c)
+        val r = list.firstOrNull { it.id == id } ?: return null
+        val n = f(r)
+        save(c, list.map { if (it.id == id) n else it })
+        return n
+    }
+
+    fun add(c: Context, inMin: Int, text: String, bolus: Boolean, cond: GlucoseCheck? = GlucoseCheck.parse(text),
+            meal: Long = 0, mealCarbs: Double = 0.0): Reminder {
         val now = System.currentTimeMillis()
         val list = all(c)
         val id = (list.maxOfOrNull { it.id } ?: 0) % 9000 + 1
-        val r = Reminder(id, now + inMin.coerceAtLeast(1) * 60_000L, text, bolus, now)
+        val r = Reminder(id, now + inMin.coerceAtLeast(1) * 60_000L, text, bolus, now,
+            cond = if (bolus) "" else cond?.json()?.toString().orEmpty(), meal = meal, mealCarbs = mealCarbs)
         // one bolus reminder at a time: a new plan replaces the old one
-        if (bolus) list.filter { it.bolus }.forEach { unschedule(c, it.id) }
-        save(c, (if (bolus) list.filterNot { it.bolus } else list) + r)
-        schedule(c, r)
+        val replaced = if (bolus) list.filter { it.bolus && it.open } else emptyList()
+        replaced.forEach { unschedule(c, it.id); nm(c).cancel(1000 + it.id) }
+        save(c, list.map { if (it in replaced) it.copy(state = Reminder.SKIPPED, closedAt = now, note = "replaced") else it } + r)
+        schedule(c, r.id, r.at)
         return r
     }
 
+    /** Takes it off the list altogether (the X, or a plan that was redone). */
     fun cancel(c: Context, id: Int) {
         unschedule(c, id)
-        c.getSystemService(NotificationManager::class.java).cancel(1000 + id)
+        nm(c).cancel(1000 + id)
         save(c, all(c).filterNot { it.id == id })
+    }
+
+    /** Closes it as done / skipped / missed and stops the ringing. */
+    fun close(c: Context, id: Int, state: String, note: String = "") {
+        unschedule(c, id)
+        nm(c).cancel(1000 + id)
+        update(c, id) { if (it.open) it.copy(state = state, closedAt = System.currentTimeMillis(), note = note) else it }
+    }
+
+    /** Ring again in [min] minutes, counting from now. */
+    fun snooze(c: Context, id: Int, min: Int = NAG_MIN) {
+        nm(c).cancel(1000 + id)
+        val r = update(c, id) { it.copy(at = System.currentTimeMillis() + min * 60_000L, rings = 0) } ?: return
+        schedule(c, r.id, r.at)
     }
 
     /** A bolus came in: it answers every bolus reminder set before it. */
     fun bolusSeen(c: Context, at: Long) {
-        all(c).filter { it.bolus && at >= it.setAt - 60_000L }.forEach { cancel(c, it.id) }
+        open(c).filter { it.bolus && at >= it.setAt - 60_000L }
+            .forEach { close(c, it.id, Reminder.DONE, "bolus seen ${Api.hhmm(at)}") }
+    }
+
+    /** Carbs went in without a bolus and the sheet was put off: ask again until it is logged. */
+    fun logLater(c: Context, at: Long, carbs: Double, inMin: Int = 30) {
+        if (open(c).any { it.meal != 0L && kotlin.math.abs(it.meal - at) < 60_000L }) return
+        add(c, inMin, "Log what you ate at ${Api.hhmm(at)}" + (if (carbs > 0) " (${carbs.toInt()} g)" else ""),
+            bolus = false, cond = null, meal = at, mealCarbs = carbs)
+    }
+
+    /** The food for that meal got logged (or "nothing to log"): its reminder is done. */
+    fun mealLogged(c: Context, at: Long) {
+        open(c).filter { it.meal != 0L && kotlin.math.abs(it.meal - at) < 60_000L }.forEach { close(c, it.id, Reminder.DONE) }
+    }
+
+    /** CamAPS shows Boost / Ease-off started (FX Watcher): the reminder to start it is done. */
+    fun boostStarted(c: Context, kind: String, at: Long) {
+        val k = kind.lowercase().replace("-", "")
+        open(c).filter { !it.bolus && it.meal == 0L && it.at - at < 3600_000L &&
+                it.text.lowercase().replace("-", "").let { t -> k in t && "start" in t } }
+            .forEach { close(c, it.id, Reminder.DONE, "$kind started ${Api.hhmm(at)}") }
+    }
+
+    /** Closes reminders nobody answered long ago. Runs on app open, boot and every ring. */
+    fun sweep(c: Context) {
+        val now = System.currentTimeMillis()
+        val stale = open(c).filter { now - it.at > STALE_MS }
+        stale.forEach { unschedule(c, it.id); nm(c).cancel(1000 + it.id) }
+        save(c, all(c).map { if (it in stale) it.copy(state = Reminder.MISSED, closedAt = now, note = "never answered") else it })
     }
 
     fun restore(c: Context) {
+        sweep(c)
         val now = System.currentTimeMillis()
-        all(c).forEach { if (it.at > now) schedule(c, it) else ring(c, it.id) }
+        open(c).forEach { if (it.at > now) schedule(c, it.id, it.at) else ring(c, it.id) }
     }
 
-    private fun schedule(c: Context, r: Reminder) {
+    private fun schedule(c: Context, id: Int, at: Long) {
         c.getSystemService(AlarmManager::class.java)
-            .setAlarmClock(AlarmManager.AlarmClockInfo(r.at, open(c, "reminders")), pi(c, ACTION_RING, r.id))
+            .setAlarmClock(AlarmManager.AlarmClockInfo(at, open(c, "reminders")), pi(c, ACTION_RING, id))
     }
 
     private fun unschedule(c: Context, id: Int) {
@@ -97,9 +204,11 @@ object Reminders {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
+    private fun nm(c: Context): NotificationManager = c.getSystemService(NotificationManager::class.java).also(::channels)
+
     private fun channels(nm: NotificationManager) {
         if (nm.getNotificationChannel(CH_BOLUS) == null) {
-            val ch = NotificationChannel(CH_BOLUS, "Bolus reminder", NotificationManager.IMPORTANCE_HIGH)
+            val ch = NotificationChannel(CH_BOLUS, "Reminder alarm", NotificationManager.IMPORTANCE_HIGH)
             ch.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             ch.enableVibration(true)
@@ -110,56 +219,175 @@ object Reminders {
             nm.createNotificationChannel(NotificationChannel(CH_STEP, "Meal plan steps", NotificationManager.IMPORTANCE_HIGH)
                 .apply { enableVibration(true) })
         }
+        if (nm.getNotificationChannel(CH_TIMER) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_TIMER, "Countdown to the next reminder", NotificationManager.IMPORTANCE_LOW)
+                .apply { setSound(null, null); setShowBadge(false) })
+        }
+        if (nm.getNotificationChannel(CH_MISSED) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_MISSED, "Missed reminders", NotificationManager.IMPORTANCE_HIGH)
+                .apply { enableVibration(true) })
+        }
     }
 
-    fun ring(c: Context, id: Int) {
+    /** The live countdown in the shade for the next reminder, like the clock app's timer. */
+    fun timer(c: Context) {
+        val nm = nm(c)
+        val now = System.currentTimeMillis()
+        val next = open(c).firstOrNull { it.at > now && it.at - now < TIMER_AHEAD_MS }
+        if (next == null) { nm.cancel(TIMER_ID); return }
+        val more = open(c).count { it.at > now } - 1
+        val n = NotificationCompat.Builder(c, CH_TIMER)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title(next))
+            .setContentText("Rings at ${Api.hhmm(next.at)}" + (if (more > 0) "  ·  $more more after" else ""))
+            .setWhen(next.at).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
+            .setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setContentIntent(open(c, "reminders"))
+            .addAction(0, "Done", pi(c, ACTION_DONE, next.id))
+            .addAction(0, "Skip", pi(c, ACTION_SKIP, next.id))
+            .build()
+        nm.notify(TIMER_ID, n)
+    }
+
+    fun title(r: Reminder) = if (r.bolus) "Bolus" + (r.text.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "") else r.text
+
+    fun ring(c: Context, id: Int, g: Glucose? = null) {
         val r = all(c).firstOrNull { it.id == id } ?: return
-        val p = Prefs(c)
-        if (r.bolus && p.lastBolusAt >= r.setAt - 60_000L) {   // bolused already (broadcast came while asleep)
-            cancel(c, id)
+        if (!r.open) return
+        val now = System.currentTimeMillis()
+        val chk = r.check
+        if (chk != null && g != null && !chk.met(g)) {   // live glucose decides: don't ask when it isn't true
+            close(c, id, if (r.rings == 0) Reminder.SKIPPED else Reminder.DONE,
+                (if (r.rings == 0) "not needed, glucose " else "settled, glucose ") + g.say())
             return
         }
-        val nm = c.getSystemService(NotificationManager::class.java)
-        channels(nm)
-        val b = NotificationCompat.Builder(c, if (r.bolus) CH_BOLUS else CH_STEP)
+        if (r.bolus && Prefs(c).lastBolusAt >= r.setAt - 60_000L) {   // bolused already (broadcast came while asleep)
+            close(c, id, Reminder.DONE, "bolus seen ${Api.hhmm(Prefs(c).lastBolusAt)}")
+            return
+        }
+        if (now - r.at > STALE_MS) { sweep(c); return }
+        val nm = nm(c)
+        if (r.rings >= NAG_MAX) {   // asked 4 times, no answer: close it as missed and say so once
+            close(c, id, Reminder.MISSED, "no answer")
+            nm.notify(1000 + id, NotificationCompat.Builder(c, CH_MISSED)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("Missed: ${title(r)}")
+                .setContentText("Due ${Api.hhmm(r.at)}, no answer after ${NAG_MAX} rings. Tap if you did it.")
+                .setContentIntent(open(c, "reminders"))
+                .addAction(0, "I did it", pi(c, ACTION_DONE, id))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build())
+            return
+        }
+        val ringNo = r.rings + 1
+        val loud = r.bolus || ringNo >= 3
+        val tap = if (r.meal != 0L) PendingIntent.getActivity(c, 3000 + id,
+                SheetActivity.intent(c, r.meal, 0.0, r.mealCarbs).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) else open(c, "reminders")
+        val b = NotificationCompat.Builder(c, if (loud) CH_BOLUS else CH_STEP)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentIntent(open(c, "reminders"))
+            .setContentIntent(tap)
             .addAction(0, "Done", pi(c, ACTION_DONE, id))
             .addAction(0, "5 more min", pi(c, ACTION_SNOOZE, id))
+            .addAction(0, "Skip", pi(c, ACTION_SKIP, id))
             .setPriority(NotificationCompat.PRIORITY_MAX)
-        if (r.bolus) {
-            b.setContentTitle("Bolus now" + (r.text.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""))
-                .setContentText("No bolus seen since ${Api.hhmm(r.setAt)}.")
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setFullScreenIntent(open(c, "reminders"), true)
-                .setOngoing(true)
-        } else {
-            b.setContentTitle(r.text).setContentText("From your meal plan at ${Api.hhmm(r.setAt)}.")
-                .setCategory(NotificationCompat.CATEGORY_REMINDER)
-        }
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(tap, true)
+            .setOngoing(true)
+            .setWhen(r.at).setShowWhen(true).setUsesChronometer(true)   // counts up: how late it is
+            .setContentTitle(if (r.bolus) "Bolus now" + (r.text.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "") else r.text)
+            .setContentText(
+                (if (r.bolus) "No bolus seen since ${Api.hhmm(r.setAt)}. " else "Due ${Api.hhmm(r.at)}. ") +
+                    (if (chk != null) (g?.let { "Glucose ${it.say()}. " } ?: "Couldn't read glucose. ") else "") +
+                    if (ringNo < NAG_MAX) "Rings again in $NAG_MIN min until you tap Done." else "Last ring.")
         val n = b.build()
-        if (r.bolus) n.flags = n.flags or Notification.FLAG_INSISTENT
+        if (loud) n.flags = n.flags or Notification.FLAG_INSISTENT
         nm.notify(1000 + id, n)
+        update(c, id) { it.copy(rings = ringNo) }
+        schedule(c, id, now + NAG_MIN * 60_000L)   // the next nag (or the missed note)
     }
 
     fun handle(c: Context, action: String?, id: Int) {
         when (action) {
             ACTION_RING -> ring(c, id)
-            ACTION_DONE -> cancel(c, id)
-            ACTION_SNOOZE -> {
-                c.getSystemService(NotificationManager::class.java).cancel(1000 + id)
-                val list = all(c)
-                val r = list.firstOrNull { it.id == id } ?: return
-                val moved = r.copy(at = System.currentTimeMillis() + 5 * 60_000L)
-                save(c, list.map { if (it.id == id) moved else it })
-                schedule(c, moved)
+            ACTION_DONE -> {
+                val r = all(c).firstOrNull { it.id == id }
+                if (r != null && r.state == Reminder.MISSED) {   // "I did it" on the missed note
+                    nm(c).cancel(1000 + id)
+                    update(c, id) { it.copy(state = Reminder.DONE, note = "done late") }
+                } else close(c, id, Reminder.DONE)
             }
+            ACTION_SKIP -> close(c, id, Reminder.SKIPPED)
+            ACTION_SNOOZE -> snooze(c, id)
         }
     }
 }
 
 class ReminderReceiver : BroadcastReceiver() {
-    override fun onReceive(c: Context, i: Intent) = Reminders.handle(c, i.action, i.getIntExtra("id", -1))
+    override fun onReceive(c: Context, i: Intent) {
+        val id = i.getIntExtra("id", -1)
+        val r = Reminders.all(c).firstOrNull { it.id == id }
+        if (i.action != Reminders.ACTION_RING || r?.check == null || !r.open) return Reminders.handle(c, i.action, id)
+        // A glucose condition: read live glucose first (up to ~20 s); if it can't be read, ring anyway.
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val g = withTimeoutOrNull(20_000L) { runCatching { Api(c).glucose() }.getOrNull() }
+                Reminders.ring(c, id, g?.takeIf { it.ageMin <= 15 })
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+}
+
+/** Live glucose from the server (Nightscout): latest value, how old, change over the last 15 min. */
+data class Glucose(val mmol: Double, val ageMin: Int, val delta15: Double) {
+    val trend get() = when { delta15 <= -0.3 -> "falling"; delta15 >= 0.3 -> "rising"; else -> "steady" }
+    fun say() = "%.1f %s".format(mmol, trend)
+}
+
+/** "Only if glucose is under 5 and falling". Under 4 always counts, whatever the trend. */
+data class GlucoseCheck(val below: Double?, val above: Double?, val trend: String?) {
+    fun met(g: Glucose): Boolean {
+        if (below != null && g.mmol < 4.0) return true
+        if (below != null && g.mmol >= below) return false
+        if (above != null && g.mmol <= above) return false
+        return trend == null || g.trend == trend
+    }
+
+    fun json(): JSONObject = JSONObject().put("below", below).put("above", above).put("trend", trend)
+    fun say() = listOfNotNull(below?.let { "under %.1f".format(it) }, above?.let { "over %.1f".format(it) }, trend)
+        .joinToString(" and ")
+
+    companion object {
+        fun of(s: String): GlucoseCheck? = if (s.isBlank()) null else runCatching {
+            val j = JSONObject(s)
+            fun d(k: String) = if (j.has(k) && !j.isNull(k)) j.getDouble(k) else null
+            GlucoseCheck(d("below"), d("above"), j.optString("trend").takeIf { it == "falling" || it == "rising" })
+                .takeIf { it.below != null || it.above != null }
+        }.getOrNull()
+
+        private const val NUM = """(\d{1,2}(?:\.\d)?)"""
+        private val BELOW = Regex("""(?:under|below|less than|<)\s*""" + NUM, RegexOption.IGNORE_CASE)
+        private val ABOVE = Regex("""(?:over|above|more than|>)\s*""" + NUM, RegexOption.IGNORE_CASE)
+
+        /** Reads the condition out of a reminder's words ("check glucose, under 5 and falling?"). */
+        fun parse(text: String): GlucoseCheck? {
+            val t = text.lowercase()
+            if (listOf("glucose", "mmol", "bg", "hypo", "sugar").none { it in t }) return null
+            val below = BELOW.find(t)?.groupValues?.get(1)?.toDoubleOrNull()
+            val above = ABOVE.find(t)?.groupValues?.get(1)?.toDoubleOrNull()
+            if (below == null && above == null) return null   // a plain "check glucose" always rings
+            val trend = when {
+                Regex("falling|dropping|going down|heading down").containsMatchIn(t) -> "falling"
+                Regex("rising|going up|climbing").containsMatchIn(t) -> "rising"
+                else -> null
+            }
+            return GlucoseCheck(below, above, trend)
+        }
+    }
 }
 
 object Notify {

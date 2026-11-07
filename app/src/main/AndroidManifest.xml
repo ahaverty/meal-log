@@ -74,6 +74,8 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="studio.alans.fxwatcher.action.BOLUS" />
+                <action android:name="studio.alans.fxwatcher.action.CARBS" />
+                <action android:name="studio.alans.fxwatcher.action.BOOST" />
             </intent-filter>
         </receiver>
 
@@ -91,6 +93,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

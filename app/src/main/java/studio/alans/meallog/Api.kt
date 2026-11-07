@@ -32,7 +32,7 @@ data class Food(val foodId: String, val name: String, val quantity: Double, val 
 data class Guess(val id: String, val label: String, val carbs: Int, val times: Int, val items: List<Food>)
 data class Logged(val time: String, val name: String, val carbs: Double)
 data class Guesses(val mealType: String, val guesses: List<Guess>, val today: List<Logged>)
-data class Step(val inMin: Int, val text: String)
+data class Step(val inMin: Int, val text: String, val cond: GlucoseCheck? = null)
 
 /** A meal plan from the server. madeAt = when it came back; minutes in it count from then. */
 data class Plan(val asked: String, val text: String, val session: String?, val eatInMin: Int?, val bolusInMin: Int?,
@@ -42,7 +42,8 @@ data class Plan(val asked: String, val text: String, val session: String?, val e
     fun json(): JSONObject = JSONObject().put("asked", asked).put("text", text).put("session", session)
         .put("made_at", madeAt).put("extras", JSONObject().put("eat_in_min", eatInMin).put("bolus_in_min", bolusInMin)
             .put("bolus_when", bolusWhen).put("carbs", carbs).put("slow_carbs", slowCarbs).put("summary", summary)
-            .put("reminders", JSONArray().apply { steps.forEach { put(JSONObject().put("in_min", it.inMin).put("text", it.text)) } })
+            .put("reminders", JSONArray().apply { steps.forEach { put(JSONObject().put("in_min", it.inMin).put("text", it.text)
+                .put("if_glucose", it.cond?.json())) } })
             .put("camaps", camaps).put("menu", menu))
 
     companion object {
@@ -52,7 +53,8 @@ data class Plan(val asked: String, val text: String, val session: String?, val e
             fun dbl(k: String) = if (x.has(k) && !x.isNull(k)) x.optDouble(k) else null
             return Plan(asked, j.optString("text"), j.optString("session").ifBlank { null }, int("eat_in_min"),
                 int("bolus_in_min"), x.optString("bolus_when"), dbl("carbs"), dbl("slow_carbs"),
-                x.optJSONArray("reminders").objects().map { Step(it.optInt("in_min"), it.optString("text")) }
+                x.optJSONArray("reminders").objects().map { Step(it.optInt("in_min"), it.optString("text"),
+                    it.optJSONObject("if_glucose")?.let { g -> GlucoseCheck.of(g.toString()) }) }
                     .filter { it.inMin > 0 && it.text.isNotBlank() },
                 x.optString("summary"), madeAt, x.optJSONObject("camaps"),
                 x.optJSONObject("menu")?.takeIf { (it.optJSONArray("picks")?.length() ?: 0) > 0 })
@@ -177,6 +179,13 @@ class Api(c: Context) {
             }
             kotlinx.coroutines.delay(2500)
         }
+    }
+
+    /** Latest CGM reading (Nightscout via the server), for reminders that only matter if glucose agrees. */
+    suspend fun glucose(): Glucose {
+        val j = call(req("/glucose").build())
+        if (!j.has("mmol")) throw RuntimeException(j.optString("error", "no glucose"))
+        return Glucose(j.getDouble("mmol"), j.optInt("age_min", 99), j.optDouble("delta15", 0.0))
     }
 
     suspend fun skip(at: Long) {
