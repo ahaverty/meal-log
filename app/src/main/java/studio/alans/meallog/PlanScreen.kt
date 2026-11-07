@@ -12,6 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
@@ -75,7 +79,9 @@ fun PlanScreen(start: PlanStart?) {
     val api = remember { Api(c) }
     val p = remember { Prefs(c) }
     val scope = rememberCoroutineScope()
-    var text by remember { mutableStateOf(start?.text ?: "") }
+    var field by remember { mutableStateOf(TextFieldValue(start?.text ?: "")) }
+    val text = field.text
+    val focus = remember { FocusRequester() }
     var eatIn by remember { mutableStateOf(0) }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var plan by remember {
@@ -115,7 +121,7 @@ fun PlanScreen(start: PlanStart?) {
             }.onSuccess { pl ->
                 if (previous != null) Reminders.all(c).filter { it.setAt >= previous.madeAt - 5000 }.forEach { Reminders.cancel(c, it.id) }
                 arm(c, pl)
-                plan = pl; text = ""; photo = null
+                plan = pl; field = TextFieldValue(""); photo = null
                 p.planJson = pl.json().toString(); p.planAt = pl.madeAt
                 p.planSummary = pl.summary; p.planCarbs = (pl.carbs ?: -1.0).toFloat()
             }.onFailure { error = it.message }
@@ -131,7 +137,12 @@ fun PlanScreen(start: PlanStart?) {
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
         } else {
-            if (pl.menu != null) MenuPicks(pl, onPick = { send("I'll have: $it") }, onNew = {
+            if (pl.menu != null) MenuPicks(pl, onPick = { send("I'll have: $it") }, onChange = {
+                // his own version of a pick: the order in the box, cursor at the end, to edit and Send
+                val t = "I'll have: $it, but "
+                field = TextFieldValue(t, TextRange(t.length))
+                scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
+            }, onNew = {
                 plan = null; p.planJson = ""
             })
             else PlanResult(pl, onNew = {
@@ -163,7 +174,7 @@ fun PlanScreen(start: PlanStart?) {
             }
             Spacer(Modifier.height(8.dp))
         }
-        OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = if (pl == null) 3 else 1,
+        OutlinedTextField(field, { field = it }, Modifier.fillMaxWidth().focusRequester(focus), minLines = if (pl == null) 3 else 1,
             placeholder = {
                 Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos, or Wagamama Dundrum" else if (pl.menu != null) "Or say what you'll have, or what you don't fancy" else "Answer or change it, e.g. 30g bag, walking home")
             })
@@ -254,7 +265,7 @@ private fun PlanResult(pl: Plan, onNew: () -> Unit) {
 
 /** A menu answer: the planner's top three picks for him, best first. Tapping one plans it. */
 @Composable
-private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onNew: () -> Unit) {
+private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> Unit, onNew: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val m = pl.menu ?: return
     val picks = m.optJSONArray("picks") ?: return
@@ -263,12 +274,12 @@ private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onNew: () -> Unit) {
             fontWeight = FontWeight.SemiBold, maxLines = 2, modifier = Modifier.weight(1f))
         TextButton(onClick = onNew) { Text("New meal") }
     }
-    Text("Top picks for you. Tap one for the CamAPS plan.", style = MaterialTheme.typography.bodyMedium,
+    Text("Top picks for you. Have one as is, change it (a different side, no sauce), or type your own below.", style = MaterialTheme.typography.bodyMedium,
         color = cs.onSurfaceVariant)
     (0 until picks.length()).forEach { i ->
         val k = picks.getJSONObject(i)
         val order = k.optString("order").ifBlank { k.optString("name") }
-        Card(onClick = { onPick(order) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
                 Box(Modifier.size(26.dp).clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
@@ -286,6 +297,10 @@ private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onNew: () -> Unit) {
                         color = cs.primary)
                     k.optString("why").takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                        Button(onClick = { onPick(order) }) { Text("Have this") }
+                        OutlinedButton(onClick = { onChange(order) }) { Text("Change it") }
                     }
                 }
             }

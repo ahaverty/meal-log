@@ -7,6 +7,8 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
+**New in v0.8.1:** each menu pick has Have this and Change it. Change it puts the order in the box so you only type the difference (a different side, no sauce). After any plan you can still reply with a change and it re-plans.
+
 **New in v0.8.0:** menus. Photograph a menu or just type the restaurant ("Wagamama Dundrum") and the Plan tab finds the menu and gives your top 3 picks for a type 1 diabetic, with carbs and meal type. Tap one for the CamAPS plan. It remembers which picks you choose and any food you say you don't like.
 
 **New in v0.7.3:** weak signal that times out while connecting ("failed to connect ... after 10000ms") is retried too, with a plain message if it still can't get through.
