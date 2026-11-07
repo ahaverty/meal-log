@@ -37,12 +37,13 @@ data class Step(val inMin: Int, val text: String)
 /** A meal plan from the server. madeAt = when it came back; minutes in it count from then. */
 data class Plan(val asked: String, val text: String, val session: String?, val eatInMin: Int?, val bolusInMin: Int?,
                 val bolusWhen: String, val carbs: Double?, val slowCarbs: Double?, val steps: List<Step>,
-                val summary: String, val madeAt: Long, val camaps: JSONObject? = null) {
+                val summary: String, val madeAt: Long, val camaps: JSONObject? = null,
+                val menu: JSONObject? = null) {
     fun json(): JSONObject = JSONObject().put("asked", asked).put("text", text).put("session", session)
         .put("made_at", madeAt).put("extras", JSONObject().put("eat_in_min", eatInMin).put("bolus_in_min", bolusInMin)
             .put("bolus_when", bolusWhen).put("carbs", carbs).put("slow_carbs", slowCarbs).put("summary", summary)
             .put("reminders", JSONArray().apply { steps.forEach { put(JSONObject().put("in_min", it.inMin).put("text", it.text)) } })
-            .put("camaps", camaps))
+            .put("camaps", camaps).put("menu", menu))
 
     companion object {
         fun of(j: JSONObject, asked: String = j.optString("asked"), madeAt: Long = j.optLong("made_at", System.currentTimeMillis())): Plan {
@@ -53,7 +54,8 @@ data class Plan(val asked: String, val text: String, val session: String?, val e
                 int("bolus_in_min"), x.optString("bolus_when"), dbl("carbs"), dbl("slow_carbs"),
                 x.optJSONArray("reminders").objects().map { Step(it.optInt("in_min"), it.optString("text")) }
                     .filter { it.inMin > 0 && it.text.isNotBlank() },
-                x.optString("summary"), madeAt, x.optJSONObject("camaps"))
+                x.optString("summary"), madeAt, x.optJSONObject("camaps"),
+                x.optJSONObject("menu")?.takeIf { (it.optJSONArray("picks")?.length() ?: 0) > 0 })
         }
     }
 }

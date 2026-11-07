@@ -101,9 +101,9 @@ fun PlanScreen(start: PlanStart?) {
     }
     LaunchedEffect(start) { if (start?.camera == true) { plan = null; camera.launch(shot.first) } }
 
-    fun send() {
-        val t = text.trim()
-        val img = photo
+    fun send(said: String? = null) {
+        val t = (said ?: text).trim()
+        val img = if (said != null) null else photo
         if (t.isEmpty() && img == null) return
         val previous = plan
         busy = true; error = null
@@ -127,11 +127,14 @@ fun PlanScreen(start: PlanStart?) {
         val pl = plan
         if (pl == null) {
             Text("What are you about to eat?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text("Describe it or photograph the plate or menu. You get the CamAPS entry, when to bolus, and reminders.",
+            Text("Describe it or photograph the plate. For a menu, send a photo or just the restaurant's name: you get your top 3 picks, then the CamAPS entry, when to bolus, and reminders.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
         } else {
-            PlanResult(pl, onNew = {
+            if (pl.menu != null) MenuPicks(pl, onPick = { send("I'll have: $it") }, onNew = {
+                plan = null; p.planJson = ""
+            })
+            else PlanResult(pl, onNew = {
                 plan = null; p.planJson = ""
             })
             Spacer(Modifier.height(12.dp))
@@ -143,7 +146,7 @@ fun PlanScreen(start: PlanStart?) {
                     CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text("Counting it up, about 30 s", fontWeight = FontWeight.SemiBold)
+                        Text(if (plan == null) "Thinking, 30 s (menus up to 2 min)" else "Counting it up, about 30 s", fontWeight = FontWeight.SemiBold)
                         asking?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
                     }
                 }
@@ -162,7 +165,7 @@ fun PlanScreen(start: PlanStart?) {
         }
         OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = if (pl == null) 3 else 1,
             placeholder = {
-                Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos" else "Answer or change it, e.g. 30g bag, walking home")
+                Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos, or Wagamama Dundrum" else if (pl.menu != null) "Or say what you'll have, or what you don't fancy" else "Answer or change it, e.g. 30g bag, walking home")
             })
         if (pl == null) {
             Text("Eating", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
@@ -249,6 +252,51 @@ private fun PlanResult(pl: Plan, onNew: () -> Unit) {
     }
 }
 
+/** A menu answer: the planner's top three picks for him, best first. Tapping one plans it. */
+@Composable
+private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onNew: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val m = pl.menu ?: return
+    val picks = m.optJSONArray("picks") ?: return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(m.optString("place").ifBlank { "Your picks" }, style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold, maxLines = 2, modifier = Modifier.weight(1f))
+        TextButton(onClick = onNew) { Text("New meal") }
+    }
+    Text("Top picks for you. Tap one for the CamAPS plan.", style = MaterialTheme.typography.bodyMedium,
+        color = cs.onSurfaceVariant)
+    (0 until picks.length()).forEach { i ->
+        val k = picks.getJSONObject(i)
+        val order = k.optString("order").ifBlank { k.optString("name") }
+        Card(onClick = { onPick(order) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
+                Box(Modifier.size(26.dp).clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
+                    Text("${i + 1}", color = cs.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(k.optString("name").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold)
+                    if (order != k.optString("name")) Text(order, style = MaterialTheme.typography.bodyMedium)
+                    val facts = listOfNotNull(
+                        if (k.has("carbs") && !k.isNull("carbs")) "~${k.optInt("carbs")} g carbs" else null,
+                        k.optString("meal_type").takeIf { it.isNotBlank() }?.let { "$it meal" })
+                    if (facts.isNotEmpty()) Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.titleSmall,
+                        color = cs.primary)
+                    k.optString("why").takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+    m.optString("source").takeIf { it.startsWith("http") }?.let {
+        Text("Menu: " + android.net.Uri.parse(it).host.orEmpty(), style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
 /** One CamAPS step: the menu words, the number to type (big), when, and a few words. */
 @Composable
 private fun StepRow(n: Int, st: CamapsStep) {
@@ -301,7 +349,7 @@ private fun PlanDetails(pl: Plan) {
     // With steps from the planner the "CamAPS entry" block is already shown above as steps.
     val rest = if (structured) blocks.filterNot { it.startsWith("CamAPS", ignoreCase = true) } else blocks
     if (rest.isEmpty()) return
-    var open by remember(pl) { mutableStateOf(!structured) }
+    var open by remember(pl) { mutableStateOf(!structured && pl.menu == null) }
     TextButton(onClick = { open = !open }, modifier = Modifier.padding(top = 8.dp)) {
         Text(if (open) "Hide breakdown" else "Breakdown and why")
     }
