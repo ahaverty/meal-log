@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -70,7 +71,8 @@ private val EAT_IN = listOf(0 to "Now", 10 to "10 min", 20 to "20 min", 30 to "3
 /**
  * "I'm about to have this": text and/or a photo of the plate or menu -> the CamAPS entry from the
  * server's planner. The answer arms its own reminders: the bolus (cancelled by the bolus itself)
- * and any later step (Boost, slow carbs). Each shows with an X. The plan is kept for 3 h.
+ * and any later step (Boost, slow carbs). Each shows with an X. The plan is kept until an hour
+ * after its eating time (Alan, 7 Nov: an old meal shouldn't greet him at the next one).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -86,7 +88,7 @@ fun PlanScreen(start: PlanStart?) {
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var plan by remember {
         mutableStateOf(runCatching {
-            if (System.currentTimeMillis() - p.planAt < 3 * 3600_000L && p.planJson.isNotBlank()) Plan.of(JSONObject(p.planJson)) else null
+            if (p.planJson.isNotBlank()) Plan.of(JSONObject(p.planJson)).takeIf { fresh(it) } else null
         }.getOrNull())
     }
     var busy by remember { mutableStateOf(false) }
@@ -106,6 +108,19 @@ fun PlanScreen(start: PlanStart?) {
         if (uri != null) photo = c.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
     }
     LaunchedEffect(start) { if (start?.camera == true) { plan = null; camera.launch(shot.first) } }
+
+    fun newMeal() {
+        plan = null; p.planJson = ""; field = TextFieldValue(""); photo = null; error = null; eatIn = 0
+        scope.launch { kotlinx.coroutines.delay(150); runCatching { focus.requestFocus() } }
+    }
+    // Let an old plan go by itself, but never under his fingers (typing a reply or waiting on one).
+    LaunchedEffect(plan) {
+        while (plan != null) {
+            kotlinx.coroutines.delay(60_000)
+            val pl = plan ?: break
+            if (!fresh(pl) && !busy && field.text.isBlank() && photo == null) { plan = null; p.planJson = "" }
+        }
+    }
 
     fun send(said: String? = null) {
         val t = (said ?: text).trim()
@@ -142,12 +157,8 @@ fun PlanScreen(start: PlanStart?) {
                 val t = "I'll have: $it, but "
                 field = TextFieldValue(t, TextRange(t.length))
                 scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
-            }, onNew = {
-                plan = null; p.planJson = ""
             })
-            else PlanResult(pl, onNew = {
-                plan = null; p.planJson = ""
-            })
+            else PlanResult(pl)
             Spacer(Modifier.height(12.dp))
         }
 
@@ -174,10 +185,21 @@ fun PlanScreen(start: PlanStart?) {
             }
             Spacer(Modifier.height(8.dp))
         }
+        if (pl != null) {
+            Text(if (pl.menu != null) "Something else?" else "Change this plan", style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+        }
         OutlinedTextField(field, { field = it }, Modifier.fillMaxWidth().focusRequester(focus), minLines = if (pl == null) 3 else 1,
             placeholder = {
-                Text(if (pl == null) "e.g. chicken stuffing sandwich and Taytos, or Wagamama Dundrum" else if (pl.menu != null) "Or say what you'll have, or what you don't fancy" else "Answer or change it, e.g. 30g bag, walking home")
-            })
+                Text(when {
+                    pl == null -> "Chicken stuffing sandwich and Taytos, or a restaurant's name"
+                    pl.menu != null -> "Say what you'll have, or what you don't fancy"
+                    else -> "Answer or change it, like a 30g bag or walking home"
+                }, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            },
+            trailingIcon = if (text.isNotEmpty()) {
+                { IconButton(onClick = { field = TextFieldValue("") }) { Icon(Icons.Default.Close, "Clear") } }
+            } else null)
         if (pl == null) {
             Text("Eating", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -191,9 +213,24 @@ fun PlanScreen(start: PlanStart?) {
             Spacer(Modifier.weight(1f))
             Button(onClick = { send() }, enabled = text.isNotBlank() || photo != null) { Text(if (pl == null) "Plan it" else "Send") }
         }
-        if (pl != null) PlanDetails(pl)
+        if (pl != null) {
+            PlanDetails(pl)
+            HorizontalDivider(Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            OutlinedButton(onClick = { newMeal() }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp)) {
+                Icon(Icons.Default.Add, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Plan a new meal", style = MaterialTheme.typography.titleSmall)
+            }
+            Text("This one clears itself an hour after you eat.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp))
+        }
     }
 }
+
+/** A plan holds until an hour after he planned to start eating. */
+private fun fresh(pl: Plan): Boolean =
+    System.currentTimeMillis() < pl.madeAt + ((pl.eatInMin ?: 0).coerceAtLeast(0) + 60) * 60_000L
 
 /** Arms the plan's reminders: the bolus (or a 10 min "did you bolus?" check when it's now) and later steps. */
 private fun arm(c: android.content.Context, pl: Plan) {
@@ -207,7 +244,7 @@ private fun arm(c: android.content.Context, pl: Plan) {
 }
 
 @Composable
-private fun PlanResult(pl: Plan, onNew: () -> Unit) {
+private fun PlanResult(pl: Plan) {
     val c = LocalContext.current
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -215,7 +252,7 @@ private fun PlanResult(pl: Plan, onNew: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
             maxLines = 2, modifier = Modifier.weight(1f))
-        TextButton(onClick = onNew) { Text("New meal") }
+        PlannedAt(pl)
     }
     val facts = listOfNotNull(cv.glucose?.let { "Glucose $it" }, cv.mealType?.let { "$it meal" })
     if (facts.isNotEmpty()) {
@@ -265,14 +302,14 @@ private fun PlanResult(pl: Plan, onNew: () -> Unit) {
 
 /** A menu answer: the planner's top three picks for him, best first. Tapping one plans it. */
 @Composable
-private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> Unit, onNew: () -> Unit) {
+private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val m = pl.menu ?: return
     val picks = m.optJSONArray("picks") ?: return
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(m.optString("place").ifBlank { "Your picks" }, style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold, maxLines = 2, modifier = Modifier.weight(1f))
-        TextButton(onClick = onNew) { Text("New meal") }
+        PlannedAt(pl)
     }
     Text("Top picks for you. Have one as is, change it (a different side, no sauce), or type your own below.", style = MaterialTheme.typography.bodyMedium,
         color = cs.onSurfaceVariant)
@@ -310,6 +347,13 @@ private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> 
         Text("Menu: " + android.net.Uri.parse(it).host.orEmpty(), style = MaterialTheme.typography.bodySmall,
             color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
     }
+}
+
+/** When the plan was made, quietly, where the New meal link used to be. */
+@Composable
+private fun PlannedAt(pl: Plan) {
+    Text(Api.hhmm(pl.madeAt), style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
 }
 
 /** One CamAPS step: the menu words, the number to type (big), when, and a few words. */
