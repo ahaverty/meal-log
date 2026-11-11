@@ -73,7 +73,7 @@ class BolusReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val CH = "meal_sheet"
+        private const val CH = "meal_sheet_quiet"
         const val ACTION_CARBS = "studio.alans.fxwatcher.action.CARBS"
         const val ACTION_BOOST = "studio.alans.fxwatcher.action.BOOST"
 

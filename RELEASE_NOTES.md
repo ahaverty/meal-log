@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.10.0:** a cleaner Plan page. Tap the mic to say what you're eating (words appear as you talk, tap again to stop), and the keyboard's Send key now sends. While it plans you see what it's doing (looking at the photo, checking your glucose, finding the menu...), a progress bar, a clock and Cancel. The long help text is gone.
+**New in v0.11.0:** calmer alerts. Only urgent reminders ring and vibrate: a bolus that hasn't been seen, or a glucose check that came true. They now also pop up over whatever app is open, marked Meal Log, with Done, Quiet 5 min and Skip. Everything else (log what you ate, plan steps, plain timers) is one silent notification with no vibration, and it no longer nags.
+
+**v0.10.0:** a cleaner Plan page. Tap the mic to say what you're eating (words appear as you talk, tap again to stop), and the keyboard's Send key now sends. While it plans you see what it's doing (looking at the photo, checking your glucose, finding the menu...), a progress bar, a clock and Cancel. The long help text is gone.
 
 **v0.9.0:** reminders you can trust. The next one is a big countdown timer on the Reminders page and a live countdown in the notification shade. Each reminder rings until you tap Done, again every 5 min (louder from the third ring); unanswered after 4 rings it is marked missed and says so. Anything left over 2 h past its time is closed as missed on its own, and Earlier shows what was done, skipped or missed. Checks like "check glucose if under 5 and falling" read your live glucose first and only ring if it's true. With FX Watcher 3.13: a hypo treatment entered in CamAPS is logged as a glucose shot without asking, a meal or snack entered without a bolus opens the log sheet (put it off and it keeps reminding you until it's logged), and a "start Ease-off" reminder closes itself when CamAPS shows it started. New timer box for plain timers like dinner.
 

@@ -64,9 +64,9 @@ object Reminders {
     private const val ACTION_SNOOZE = "studio.alans.meallog.SNOOZE"
     private const val ACTION_SKIP = "studio.alans.meallog.SKIP"
     private const val CH_BOLUS = "bolus_reminder"
-    private const val CH_STEP = "plan_step"
+    private const val CH_QUIET = "quiet_reminder"   // non-urgent: no sound, no vibration
     private const val CH_TIMER = "countdown"
-    private const val CH_MISSED = "missed"
+    private const val CH_MISSED = "missed"           // only urgent reminders get here
     const val TIMER_ID = 999
 
     const val NAG_MIN = 5
@@ -125,6 +125,7 @@ object Reminders {
 
     /** Takes it off the list altogether (the X, or a plan that was redone). */
     fun cancel(c: Context, id: Int) {
+        AlertOverlay.hide(id)
         unschedule(c, id)
         nm(c).cancel(1000 + id)
         save(c, all(c).filterNot { it.id == id })
@@ -132,6 +133,7 @@ object Reminders {
 
     /** Closes it as done / skipped / missed and stops the ringing. */
     fun close(c: Context, id: Int, state: String, note: String = "") {
+        AlertOverlay.hide(id)
         unschedule(c, id)
         nm(c).cancel(1000 + id)
         update(c, id) { if (it.open) it.copy(state = state, closedAt = System.currentTimeMillis(), note = note) else it }
@@ -139,6 +141,7 @@ object Reminders {
 
     /** Ring again in [min] minutes, counting from now. */
     fun snooze(c: Context, id: Int, min: Int = NAG_MIN) {
+        AlertOverlay.hide(id)
         nm(c).cancel(1000 + id)
         val r = update(c, id) { it.copy(at = System.currentTimeMillis() + min * 60_000L, rings = 0) } ?: return
         schedule(c, r.id, r.at)
@@ -174,7 +177,7 @@ object Reminders {
     fun sweep(c: Context) {
         val now = System.currentTimeMillis()
         val stale = open(c).filter { now - it.at > STALE_MS }
-        stale.forEach { unschedule(c, it.id); nm(c).cancel(1000 + it.id) }
+        stale.forEach { unschedule(c, it.id); nm(c).cancel(1000 + it.id); AlertOverlay.hide(it.id) }
         save(c, all(c).map { if (it in stale) it.copy(state = Reminder.MISSED, closedAt = now, note = "never answered") else it })
     }
 
@@ -209,15 +212,18 @@ object Reminders {
     private fun channels(nm: NotificationManager) {
         if (nm.getNotificationChannel(CH_BOLUS) == null) {
             val ch = NotificationChannel(CH_BOLUS, "Reminder alarm", NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "Urgent only: bolus not seen, glucose checks that came true."
             ch.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
             ch.enableVibration(true)
             ch.setBypassDnd(true)
             nm.createNotificationChannel(ch)
         }
-        if (nm.getNotificationChannel(CH_STEP) == null) {
-            nm.createNotificationChannel(NotificationChannel(CH_STEP, "Meal plan steps", NotificationManager.IMPORTANCE_HIGH)
-                .apply { enableVibration(true) })
+        // The old vibrating "Meal plan steps" channel: Android won't let an app make a channel quieter.
+        if (nm.getNotificationChannel("plan_step") != null) nm.deleteNotificationChannel("plan_step")
+        if (nm.getNotificationChannel(CH_QUIET) == null) {
+            nm.createNotificationChannel(NotificationChannel(CH_QUIET, "Reminders (quiet)", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { setSound(null, null); enableVibration(false); description = "Log your food, plan steps, timers. No sound or vibration." })
         }
         if (nm.getNotificationChannel(CH_TIMER) == null) {
             nm.createNotificationChannel(NotificationChannel(CH_TIMER, "Countdown to the next reminder", NotificationManager.IMPORTANCE_LOW)
@@ -239,7 +245,7 @@ object Reminders {
         val n = NotificationCompat.Builder(c, CH_TIMER)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title(next))
-            .setContentText("Rings at ${Api.hhmm(next.at)}" + (if (more > 0) "  ·  $more more after" else ""))
+            .setContentText((if (next.bolus || next.check != null) "Rings at " else "Quiet reminder at ") + Api.hhmm(next.at) + (if (more > 0) "  ·  $more more after" else ""))
             .setWhen(next.at).setShowWhen(true).setUsesChronometer(true).setChronometerCountDown(true)
             .setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
@@ -281,11 +287,28 @@ object Reminders {
             return
         }
         val ringNo = r.rings + 1
-        val loud = r.bolus || ringNo >= 3
+        // Urgent = bolus not seen, or a glucose check that came true (or glucose couldn't be read).
+        // Those ring, nag and pop up over other apps. Everything else (log your food, plan steps,
+        // plain timers) is one silent notification that stays until answered or goes stale.
+        val urgent = r.bolus || chk != null
         val tap = if (r.meal != 0L) PendingIntent.getActivity(c, 3000 + id,
                 SheetActivity.intent(c, r.meal, 0.0, r.mealCarbs).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) else open(c, "reminders")
-        val b = NotificationCompat.Builder(c, if (loud) CH_BOLUS else CH_STEP)
+        if (!urgent) {
+            nm.notify(1000 + id, NotificationCompat.Builder(c, CH_QUIET)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentIntent(tap)
+                .setContentTitle(r.text)
+                .setContentText("Due ${Api.hhmm(r.at)}" + if (r.meal != 0L) ". Tap to log it." else "")
+                .addAction(0, "Done", pi(c, ACTION_DONE, id))
+                .addAction(0, "Skip", pi(c, ACTION_SKIP, id))
+                .setSilent(true).setOnlyAlertOnce(true)
+                .setTimeoutAfter(STALE_MS)
+                .build())
+            update(c, id) { it.copy(rings = ringNo) }
+            return
+        }
+        val b = NotificationCompat.Builder(c, CH_BOLUS)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentIntent(tap)
             .addAction(0, "Done", pi(c, ACTION_DONE, id))
@@ -302,11 +325,21 @@ object Reminders {
                     (if (chk != null) (g?.let { "Glucose ${it.say()}. " } ?: "Couldn't read glucose. ") else "") +
                     if (ringNo < NAG_MAX) "Rings again in $NAG_MIN min until you tap Done." else "Last ring.")
         val n = b.build()
-        if (loud) n.flags = n.flags or Notification.FLAG_INSISTENT
+        n.flags = n.flags or Notification.FLAG_INSISTENT
         nm.notify(1000 + id, n)
+        AlertOverlay.show(c, id, if (r.bolus) "Bolus now" + (r.text.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "") else r.text,
+            (if (r.bolus) "No bolus seen since ${Api.hhmm(r.setAt)}." else "Due ${Api.hhmm(r.at)}.") +
+                (if (chk != null) g?.let { " Glucose ${it.say()}." } ?: " Couldn't read glucose." else ""))
         update(c, id) { it.copy(rings = ringNo) }
         schedule(c, id, now + NAG_MIN * 60_000L)   // the next nag (or the missed note)
     }
+
+    enum class Answer { DONE, SNOOZE, SKIP }
+
+    /** From the popup's buttons. */
+    fun answer(c: Context, id: Int, a: Answer) = handle(c, when (a) {
+        Answer.DONE -> ACTION_DONE; Answer.SNOOZE -> ACTION_SNOOZE; Answer.SKIP -> ACTION_SKIP
+    }, id)
 
     fun handle(c: Context, action: String?, id: Int) {
         when (action) {
@@ -395,9 +428,11 @@ object Notify {
 
     fun channel(c: Context, id: String, name: String, importance: Int, sound: Boolean) {
         val nm = c.getSystemService(NotificationManager::class.java)
+        // the old "After a meal bolus" channel could vibrate; its replacement can't
+        if (nm.getNotificationChannel("meal_sheet") != null) nm.deleteNotificationChannel("meal_sheet")
         if (nm.getNotificationChannel(id) != null) return
         val ch = NotificationChannel(id, name, importance)
-        if (!sound) ch.setSound(null, null)
+        if (!sound) { ch.setSound(null, null); ch.enableVibration(false) }
         nm.createNotificationChannel(ch)
     }
 }

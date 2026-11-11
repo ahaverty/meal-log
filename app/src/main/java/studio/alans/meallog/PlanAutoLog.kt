@@ -22,7 +22,7 @@ import kotlin.math.max
  * 45 min of when the plan said to bolus. Otherwise the sheet opens as before, plan first.
  */
 object PlanAutoLog {
-    private const val CH = "meal_sheet"
+    private const val CH = "meal_sheet_quiet"
 
     /** True when it took the bolus (logging in the background); false = open the sheet instead. */
     fun tryLog(c: Context, at: Long, carbs: Double, async: () -> BroadcastReceiver.PendingResult?): Boolean {

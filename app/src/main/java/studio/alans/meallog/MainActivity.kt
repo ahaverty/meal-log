@@ -207,7 +207,7 @@ private fun RemindersPage(list: List<Reminder>) {
         val next = ringing.firstOrNull() ?: list.firstOrNull()
         if (next == null) {
             Text("Nothing coming up.", style = MaterialTheme.typography.bodyLarge)
-            Text("Plans set their own reminders. Each one rings until you tap Done; checks with a glucose condition only ring if your glucose says so.",
+            Text("Only urgent reminders ring and pop up: a bolus not seen yet, or a glucose check that came true. The rest are silent notifications.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             TimerCard(next, now)
