@@ -168,16 +168,17 @@ class Api(c: Context) {
         return call(post("/plan", j)).getString("job")
     }
 
-    /** Waits for a plan job (it runs Claude, 20-60 s). */
-    suspend fun planResult(job: String, asked: String): Plan {
+    /** Waits for a plan job (it runs Claude, 20-60 s), passing on what it's doing as it goes. */
+    suspend fun planResult(job: String, asked: String, onStage: (List<String>) -> Unit = {}): Plan {
         while (true) {
             val j = call(req("/plan/$job").build())
+            j.optJSONArray("stages")?.strings()?.let(onStage)
             when (j.optString("state")) {
                 "done" -> return Plan.of(j, asked, System.currentTimeMillis())
                 "failed" -> throw RuntimeException(j.optString("error", "The planner failed"))
                 "unknown" -> throw RuntimeException("The server restarted, try again")
             }
-            kotlinx.coroutines.delay(2500)
+            kotlinx.coroutines.delay(1500)
         }
     }
 
