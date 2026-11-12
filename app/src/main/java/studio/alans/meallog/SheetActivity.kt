@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -25,13 +25,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * The sheet over CamAPS after a meal bolus. Dismissing it is always one tap: X, "Not now", the dim
- * area above it or Back. It closes itself after logging.
+ * The sheet over CamAPS after a meal bolus. Putting it off is the X or Back only: a stray tap on the
+ * dim area above it no longer dismisses it. It closes itself after logging. MealPanel scrolls its
+ * middle and pins the header and the Log bar, so the sheet itself doesn't scroll.
  */
 class SheetActivity : ComponentActivity() {
     private var handled = false
 
-    /** Closed without logging (Not now, X, Back, the dim area): ask again in 30 min, firmly. */
+    /** Closed without logging (X or Back): ask again in 30 min, firmly. */
     override fun onDestroy() {
         super.onDestroy()
         if (isFinishing && !handled) {
@@ -48,16 +49,17 @@ class SheetActivity : ComponentActivity() {
         val carbs = intent.getDoubleExtra("carbs", -1.0).takeIf { it >= 0 }
         setContent {
             MealTheme {
+                // The dim area swallows taps (does nothing) so a stray one can't put the sheet off.
                 Box(Modifier.fillMaxSize().background(Color(0x66000000))
-                    .clickable(remember { MutableInteractionSource() }, null) { finish() },
+                    .clickable(remember { MutableInteractionSource() }, null) { },
                     contentAlignment = Alignment.BottomCenter) {
                     Surface(
-                        Modifier.fillMaxWidth().imePadding()
+                        Modifier.fillMaxWidth().statusBarsPadding().padding(top = 24.dp).imePadding()
                             .clickable(remember { MutableInteractionSource() }, null) { },
                         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                         tonalElevation = 3.dp,
                     ) {
-                        Box(Modifier.navigationBarsPadding().verticalScroll(rememberScrollState())) {
+                        Box(Modifier.navigationBarsPadding()) {
                             MealPanel(at, carbs, units, sheet = true) { handled = it; finish() }
                         }
                     }

@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.11.0:** calmer alerts. Only urgent reminders ring and vibrate: a bolus that hasn't been seen, or a glucose check that came true. They now also pop up over whatever app is open, marked Meal Log, with Done, Quiet 5 min and Skip. Everything else (log what you ate, plan steps, plain timers) is one silent notification with no vibration, and it no longer nags.
+**New in v0.11.1:** the "What are you eating?" popup after a bolus is rebuilt so you can't hit the wrong button. The filled **Log** button is always bottom right and never moves; "Not now" is gone from the bottom (use the X or Back), and tapping the dim area no longer dismisses it. **Nothing to log** sits bottom left and gives you 4 s to Undo. While your usual meals load, their space is held so nothing jumps under your thumb, and a tapped meal shows a spinner. Typed words and picked foods are always logged together, never one dropped. The plan's breakdown no longer shows the planner's raw JSON.
+
+**v0.11.0:** calmer alerts. Only urgent reminders ring and vibrate: a bolus that hasn't been seen, or a glucose check that came true. They now also pop up over whatever app is open, marked Meal Log, with Done, Quiet 5 min and Skip. Everything else (log what you ate, plan steps, plain timers) is one silent notification with no vibration, and it no longer nags.
 
 **v0.10.0:** a cleaner Plan page. Tap the mic to say what you're eating (words appear as you talk, tap again to stop), and the keyboard's Send key now sends. While it plans you see what it's doing (looking at the photo, checking your glucose, finding the menu...), a progress bar, a clock and Cancel. The long help text is gone.
 

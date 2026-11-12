@@ -514,6 +514,8 @@ private fun StepRow(n: Int, st: CamapsStep) {
 @Composable
 private fun PlanDetails(pl: Plan) {
     val blocks = pl.text.replace("**", "").split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
+        // Never show the planner's raw JSON line, even if the server couldn't read it (12 Nov).
+        .filterNot { it.startsWith("{") && it.endsWith("}") }
     val structured = (pl.camaps?.optJSONArray("steps")?.length() ?: 0) > 0
     // With steps from the planner the "CamAPS entry" block is already shown above as steps.
     val rest = if (structured) blocks.filterNot { it.startsWith("CamAPS", ignoreCase = true) } else blocks
