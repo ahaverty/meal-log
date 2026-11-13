@@ -31,7 +31,7 @@ object PlanAutoLog {
         val planned = p.planCarbs.toDouble()
         if (summary.isBlank() || planned <= 0 || p.planJson.isBlank()) return false
         val plan = runCatching { Plan.of(JSONObject(p.planJson)) }.getOrNull() ?: return false
-        val due = p.planAt + (plan.bolusInMin ?: plan.eatInMin ?: 0) * 60_000L
+        val due = plan.at(plan.bolusInMin ?: plan.eatInMin ?: 0)
         if (at < p.planAt - 5 * 60_000L || abs(at - due) > 45 * 60_000L) return false
         if (abs(carbs - planned) > max(5.0, planned * 0.2)) return false
         if (!Api(c).configured()) return false

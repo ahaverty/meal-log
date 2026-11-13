@@ -147,6 +147,23 @@ object Reminders {
         schedule(c, r.id, r.at)
     }
 
+    /**
+     * He moved the meal (started cooking, realised he's eating later): these reminders move by [ms].
+     * One already ringing stops and counts again from now, so nothing goes off while he cooks.
+     */
+    fun shift(c: Context, ids: Collection<Int>, ms: Long) {
+        val now = System.currentTimeMillis()
+        val list = all(c)
+        val moved = list.filter { it.open && it.id in ids }
+        moved.forEach { AlertOverlay.hide(it.id); unschedule(c, it.id); nm(c).cancel(1000 + it.id) }
+        val next = moved.associate { r ->
+            val at = (if (r.at <= now && r.rings > 0) now + ms else r.at + ms).coerceAtLeast(now + 60_000L)
+            r.id to r.copy(at = at, rings = 0)
+        }
+        save(c, list.map { next[it.id] ?: it })
+        next.values.forEach { schedule(c, it.id, it.at) }
+    }
+
     /** A bolus came in: it answers every bolus reminder set before it. */
     fun bolusSeen(c: Context, at: Long) {
         open(c).filter { it.bolus && at >= it.setAt - 60_000L }

@@ -58,7 +58,8 @@ object Camaps {
         if (j != null) {
             val arr = j.optJSONArray("steps")
             val steps = (0 until (arr?.length() ?: 0)).mapNotNull { i -> arr!!.optJSONObject(i)?.let(::step) }
-            if (steps.isNotEmpty()) return CamapsView(j.s("glucose"), j.s("meal_type"), steps, j.s("question"))
+            if (steps.isNotEmpty()) return CamapsView(j.s("glucose"), j.s("meal_type"),
+                if (pl.shiftMs == 0L) steps else steps.map { moved(it, pl.shiftMs) }, j.s("question"))
         }
         return fallback(pl)
     }
@@ -85,16 +86,29 @@ object Camaps {
         }
     }
 
+    private val CLOCK = Regex("""(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)""")
+
+    /** "12:05" -> "12:25" when he moved the meal 20 min later. */
+    fun shiftClock(s: String?, ms: Long): String? = s?.replace(CLOCK) { m ->
+        val mins = ((m.groupValues[1].toInt() * 60 + m.groupValues[2].toInt() + ms / 60_000L) % 1440 + 1440) % 1440
+        "%02d:%02d".format(mins / 60, mins % 60)
+    }
+
+    /** The planner wrote clock times into its steps: they move with the meal. */
+    private fun moved(st: CamapsStep, ms: Long) = st.copy(time = shiftClock(st.time, ms),
+        value = if (st.kind == CamapsStep.Kind.Mode || st.kind == CamapsStep.Kind.Check) shiftClock(st.value, ms)!! else st.value,
+        sub = shiftClock(st.sub, ms), ifText = shiftClock(st.ifText, ms), thenText = shiftClock(st.thenText, ms))
+
     /** Plans from before the planner sent steps: rebuilt from the numbers and reminders. */
     private fun fallback(pl: Plan): CamapsView {
         val steps = mutableListOf<CamapsStep>()
-        val bolusAt = pl.bolusInMin?.let { Api.hhmm(pl.madeAt + it * 60_000L) }
+        val bolusAt = pl.bolusInMin?.let { Api.hhmm(pl.at(it)) }
         pl.carbs?.let { steps += CamapsStep(CamapsStep.Kind.Bolus, "Bolus", g(it), bolusAt, pl.bolusWhen.ifBlank { null }) }
         pl.slowCarbs?.takeIf { it > 0 }?.let {
             steps += CamapsStep(CamapsStep.Kind.AddMeal, "Add meal › Slowly absorbed meal", g(it), bolusAt, null)
         }
         pl.steps.forEach { st ->
-            steps += CamapsStep(CamapsStep.Kind.Other, st.text, Api.hhmm(pl.madeAt + st.inMin * 60_000L), null, null)
+            steps += CamapsStep(CamapsStep.Kind.Other, st.text, Api.hhmm(pl.at(st.inMin)), null, null)
         }
         return CamapsView(null, null, steps, null)
     }

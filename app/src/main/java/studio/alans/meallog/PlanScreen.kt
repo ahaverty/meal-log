@@ -75,11 +75,25 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
-private val EAT_IN = listOf(0 to "Now", 10 to "10 min", 20 to "20 min", 30 to "30 min", 45 to "45 min")
+/** The steps the - and + on the Eating row go through; any other time comes from the clock picker. */
+private val EAT_STEPS = listOf(0, 5, 10, 15, 20, 30, 45, 60, 90, 120)
 
 /**
  * "I'm about to have this": text and/or a photo of the plate or menu -> the CamAPS entry from the
@@ -134,7 +148,8 @@ fun PlanScreen(start: PlanStart?) {
     LaunchedEffect(start) { if (start?.camera == true) { plan = null; camera.launch(shot.first) } }
 
     fun newMeal() {
-        plan = null; p.planJson = ""; field = TextFieldValue(""); photo = null; error = null; eatIn = 0
+        plan = null; p.planJson = ""; p.planSummary = ""; p.planCarbs = -1f
+        field = TextFieldValue(""); photo = null; error = null; eatIn = 0
         scope.launch { kotlinx.coroutines.delay(150); runCatching { focus.requestFocus() } }
     }
     // Let an old plan go by itself, but never under his fingers (typing a reply or waiting on one).
@@ -157,7 +172,8 @@ fun PlanScreen(start: PlanStart?) {
         val asked = if (previous == null) asking!! else previous.asked + "\n" + asking!!
         job = scope.launch {
             runCatching {
-                api.planResult(api.plan(t, img?.let(::jpeg), previous?.session, if (previous == null) eatIn else null),
+                api.planResult(api.plan(t, img?.let(::jpeg), previous?.session, if (previous == null) eatIn
+                    else previous.takeIf { it.shiftMs != 0L }?.let { ((it.eatAt - System.currentTimeMillis()) / 60_000L).toInt().coerceIn(0, 240) }),
                     asked) { stages = it }
             }.onSuccess { pl ->
                 if (previous != null) Reminders.open(c).filter { it.setAt >= previous.madeAt - 5000 }.forEach { Reminders.cancel(c, it.id) }
@@ -170,12 +186,25 @@ fun PlanScreen(start: PlanStart?) {
         }
     }
 
+    // He started cooking and is eating later than he said: the plan and its reminders move with him.
+    fun shift(ms: Long) {
+        val pl = plan ?: return
+        Reminders.shift(c, Reminders.open(c).filter { it.setAt >= pl.madeAt - 5000 && it.meal == 0L }.map { it.id }, ms)
+        val n = pl.copy(shiftMs = pl.shiftMs + ms)
+        plan = n; p.planJson = n.json().toString()
+    }
+    fun notEating() {
+        val pl = plan ?: return
+        Reminders.open(c).filter { it.setAt >= pl.madeAt - 5000 && it.meal == 0L }.forEach { Reminders.cancel(c, it.id) }
+        newMeal()
+    }
+
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         val pl = plan
         if (pl == null) {
             if (!busy) {
-                Text("What are you eating?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
+                Text(askFor(System.currentTimeMillis() + eatIn * 60_000L), style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 14.dp))
             }
         } else {
             if (pl.menu != null) MenuPicks(pl, onPick = { send("I'll have: $it") }, onChange = {
@@ -184,7 +213,7 @@ fun PlanScreen(start: PlanStart?) {
                 field = TextFieldValue(t, TextRange(t.length))
                 scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
             })
-            else PlanResult(pl)
+            else PlanResult(pl, onShift = ::shift, onNotEating = ::notEating)
             Spacer(Modifier.height(12.dp))
         }
 
@@ -203,49 +232,62 @@ fun PlanScreen(start: PlanStart?) {
         }
         if (pl != null) {
             Text(if (pl.menu != null) "Something else?" else "Change this plan", style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+                modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
         }
         val canSend = text.isNotBlank() || photo != null
-        OutlinedTextField(field, { field = it; voiceBase = null }, Modifier.fillMaxWidth().focusRequester(focus),
-            minLines = if (pl == null) 2 else 1, maxLines = 6,
-            shape = RoundedCornerShape(16.dp),
-            // the keyboard's Enter key is Send (Alan, 11 Nov: no more closing the keyboard to find the button)
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
-            placeholder = {
-                Text(when {
-                    voice.listening -> "Listening…"
-                    pl == null -> "A chicken sandwich and Taytos, or a restaurant"
-                    pl.menu != null -> "What you'll have, or what you don't fancy"
-                    else -> "Answer or change it, like a 30g bag"
-                }, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-            },
-            trailingIcon = if (text.isNotEmpty() && !voice.listening) {
-                { IconButton(onClick = { field = TextFieldValue(""); voiceBase = null }) { Icon(Icons.Default.Close, "Clear") } }
-            } else null)
+        val cs = MaterialTheme.colorScheme
+        // One composer card: the words, then photo / mic on the left and Plan it on the right.
+        Surface(shape = RoundedCornerShape(24.dp), color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+            Column {
+                TextField(field, { field = it; voiceBase = null }, Modifier.fillMaxWidth().focusRequester(focus),
+                    minLines = if (pl == null) 2 else 1, maxLines = 6,
+                    textStyle = MaterialTheme.typography.bodyLarge,
+                    colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+                    // the keyboard's Enter key is Send (Alan, 11 Nov: no more closing the keyboard to find the button)
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
+                    placeholder = {
+                        Text(when {
+                            voice.listening -> "Listening…"
+                            pl == null -> "A chicken sandwich and Taytos, or a restaurant"
+                            pl.menu != null -> "What you'll have, or what you don't fancy"
+                            else -> "Answer or change it, like a 30g bag"
+                        }, color = cs.onSurfaceVariant.copy(alpha = 0.6f))
+                    },
+                    trailingIcon = if (text.isNotEmpty() && !voice.listening) {
+                        { IconButton(onClick = { field = TextFieldValue(""); voiceBase = null }) { Icon(Icons.Default.Close, "Clear") } }
+                    } else null)
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 6.dp, end = 8.dp, bottom = 8.dp)) {
+                    IconButton(onClick = { camera.launch(shot.first) }) {
+                        Icon(painterResource(R.drawable.sc_camera), "Camera", tint = cs.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                        Icon(painterResource(R.drawable.ic_image), "Photo from gallery", tint = cs.onSurfaceVariant)
+                    }
+                    MicButton(voice)
+                    Spacer(Modifier.weight(1f))
+                    Button(onClick = { send() }, enabled = canSend, modifier = Modifier.height(44.dp),
+                        contentPadding = PaddingValues(start = 18.dp, end = 14.dp)) {
+                        Text(if (pl == null) "Plan it" else "Send", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
         (voice.error ?: error)?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp))
+            Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp, start = 4.dp))
         }
         if (pl == null) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                EAT_IN.forEach { (m, label) -> FilterChip(eatIn == m, { eatIn = m }, label = { Text(if (m == 0) "Eating now" else "In $label") }) }
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-            FilledTonalIconButton(onClick = { camera.launch(shot.first) }, Modifier.size(48.dp)) {
-                Icon(painterResource(R.drawable.sc_camera), "Camera")
-            }
-            Spacer(Modifier.width(8.dp))
-            FilledTonalIconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                Modifier.size(48.dp)) { Icon(painterResource(R.drawable.ic_image), "Photo from gallery") }
-            Spacer(Modifier.width(8.dp))
-            MicButton(voice)
-            Spacer(Modifier.weight(1f))
-            Button(onClick = { send() }, enabled = canSend, modifier = Modifier.height(48.dp)) {
-                Text(if (pl == null) "Plan it" else "Send", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+            WhenRow(eatIn) { eatIn = it }
+            if (text.isBlank() && photo == null) {
+                UsualPicks(System.currentTimeMillis() + eatIn * 60_000L) { q ->
+                    field = TextFieldValue(q.label, TextRange(q.label.length))
+                    scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
+                }
             }
         }
         if (pl != null) {
@@ -266,14 +308,156 @@ private fun MicButton(v: VoiceState) {
     val cs = MaterialTheme.colorScheme
     val ring by animateFloatAsState(if (v.listening) 1f + v.level * 0.35f else 1f, label = "mic")
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp)) {
-        if (v.listening) Box(Modifier.size(48.dp).graphicsLayer { scaleX = ring; scaleY = ring }
+        if (v.listening) Box(Modifier.size(40.dp).graphicsLayer { scaleX = ring; scaleY = ring }
             .clip(CircleShape).background(cs.error.copy(alpha = 0.25f)))
-        FilledIconButton(onClick = { v.toggle() }, Modifier.size(48.dp),
-            colors = if (v.listening) IconButtonDefaults.filledIconButtonColors(containerColor = cs.error, contentColor = cs.onError)
-                else IconButtonDefaults.filledIconButtonColors()) {
-            Icon(painterResource(R.drawable.ic_mic), if (v.listening) "Stop listening" else "Speak")
+        if (v.listening) FilledIconButton(onClick = { v.toggle() }, Modifier.size(40.dp),
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = cs.error, contentColor = cs.onError)) {
+            Icon(painterResource(R.drawable.ic_mic), "Stop listening")
+        } else IconButton(onClick = { v.toggle() }) {
+            Icon(painterResource(R.drawable.ic_mic), "Speak", tint = cs.onSurfaceVariant)
         }
     }
+}
+
+/** "What's for lunch?" by the time he'll be eating. */
+private fun askFor(at: Long): String {
+    val h = java.util.Calendar.getInstance().apply { timeInMillis = at }.get(java.util.Calendar.HOUR_OF_DAY)
+    return when (h) {
+        in 5..10 -> "What's for breakfast?"
+        in 11..14 -> "What's for lunch?"
+        in 17..21 -> "What's for dinner?"
+        else -> "What are you eating?"
+    }
+}
+
+/** 20 min / 1 h / 1 h 30 min */
+private fun mins(m: Int): String = when {
+    m < 60 -> "$m min"
+    m % 60 == 0 -> "${m / 60} h"
+    else -> "${m / 60} h ${m % 60} min"
+}
+
+/** A clock time picked for today (or tomorrow, if that time is long gone). */
+private fun clockToday(hour: Int, minute: Int, now: Long = System.currentTimeMillis()): Long {
+    val cal = java.util.Calendar.getInstance().apply {
+        timeInMillis = now; set(java.util.Calendar.HOUR_OF_DAY, hour); set(java.util.Calendar.MINUTE, minute)
+        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+    }
+    if (cal.timeInMillis < now - 6 * 3600_000L) cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+    return cal.timeInMillis
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeDialog(initial: Long, title: String, onPick: (Long) -> Unit, onDismiss: () -> Unit) {
+    val cal = remember { java.util.Calendar.getInstance().apply { timeInMillis = initial } }
+    val st = rememberTimePickerState(cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE), is24Hour = true)
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(st) } },
+        confirmButton = { TextButton(onClick = { onPick(clockToday(st.hour, st.minute)) }) { Text("Set") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+/** When he'll start eating: one line, - and + to nudge, tap it for a clock. Replaces the row of chips. */
+@Composable
+private fun WhenRow(eatIn: Int, onChange: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(20_000); now = System.currentTimeMillis() } }
+    var picking by remember { mutableStateOf(false) }
+    Surface(onClick = { picking = true }, shape = RoundedCornerShape(20.dp), color = cs.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(R.drawable.ic_schedule), null, Modifier.size(22.dp), tint = cs.primary)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Eating", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(if (eatIn == 0) "Now" else "In ${mins(eatIn)}", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold)
+                    if (eatIn > 0) Text("  ${Api.hhmm(now + eatIn * 60_000L)}", style = MaterialTheme.typography.bodyMedium,
+                        color = cs.onSurfaceVariant)
+                }
+            }
+            FilledTonalIconButton(onClick = { onChange(EAT_STEPS.lastOrNull { it < eatIn } ?: 0) }, enabled = eatIn > 0) {
+                Icon(painterResource(R.drawable.ic_minus), "Sooner")
+            }
+            Spacer(Modifier.width(4.dp))
+            FilledTonalIconButton(onClick = { onChange(EAT_STEPS.firstOrNull { it > eatIn } ?: (eatIn + 30).coerceAtMost(240)) },
+                enabled = eatIn < 240) {
+                Icon(Icons.Default.Add, "Later")
+            }
+        }
+    }
+    if (picking) TimeDialog(now + eatIn * 60_000L, "Start eating at", onPick = { t ->
+        onChange(((t - System.currentTimeMillis() + 30_000L) / 60_000L).toInt().coerceIn(0, 240)); picking = false
+    }, onDismiss = { picking = false })
+}
+
+/** His usual meals around that time, from the phone's cache (no wait). Tapping one fills the box to edit or send. */
+@Composable
+private fun UsualPicks(at: Long, onPick: (QuickPick) -> Unit) {
+    val c = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    val v = QuickPicks.version.collectAsState().value
+    val picks = remember(at / 600_000L, v) { QuickPicks.near(c, at) }
+    if (picks.isEmpty()) return
+    Text("YOUR USUAL AROUND ${Api.hhmm(at - at % 1_800_000L)}", style = MaterialTheme.typography.labelMedium,
+        letterSpacing = 1.2.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 22.dp, bottom = 8.dp))
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column {
+            picks.forEachIndexed { i, q ->
+                if (i > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = cs.outlineVariant.copy(alpha = 0.4f))
+                Row(Modifier.fillMaxWidth().clickable { onPick(q) }.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(q.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("About ${q.carbs} g carbs" + if (q.times > 1) "  ·  had it ${q.times} times" else "",
+                            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    Icon(painterResource(R.drawable.ic_north_west), "Use this", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * When the planned meal starts, with a way out when cooking runs long (Alan, 13 Nov: he tapped
+ * Eating now, started cooking, and the reminders went off at the stove). +10 / +20 or a clock moves
+ * the plan and every reminder it set; "Not eating after all" drops them.
+ */
+@Composable
+private fun MealTime(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var picking by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(R.drawable.ic_schedule), null, Modifier.size(22.dp), tint = cs.primary)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (pl.shiftMs != 0L) "Eating (moved)" else "Eating", style = MaterialTheme.typography.labelMedium,
+                    color = cs.onSurfaceVariant)
+                Text(Api.hhmm(pl.eatAt), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Text("Later", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            TextButton(onClick = { onShift(10 * 60_000L) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+10") }
+            TextButton(onClick = { onShift(20 * 60_000L) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+20") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("Pick a time") }, onClick = { menu = false; picking = true })
+                    DropdownMenuItem(text = { Text("Not eating after all") }, onClick = { menu = false; onNotEating() })
+                }
+            }
+        }
+    }
+    if (picking) TimeDialog(pl.eatAt, "Start eating at", onPick = { t ->
+        picking = false; onShift(t - pl.eatAt)
+    }, onDismiss = { picking = false })
 }
 
 /** Every stage the planner reports, in its usual order, for the checklist while he waits. */
@@ -342,7 +526,7 @@ private fun PlanProgress(asking: String, stages: List<String>, startedAt: Long, 
 
 /** A plan holds until an hour after he planned to start eating. */
 private fun fresh(pl: Plan): Boolean =
-    System.currentTimeMillis() < pl.madeAt + ((pl.eatInMin ?: 0).coerceAtLeast(0) + 60) * 60_000L
+    System.currentTimeMillis() < pl.eatAt + 60 * 60_000L
 
 /** Arms the plan's reminders: the bolus (or a 10 min "did you bolus?" check when it's now) and later steps. */
 private fun arm(c: android.content.Context, pl: Plan) {
@@ -356,7 +540,7 @@ private fun arm(c: android.content.Context, pl: Plan) {
 }
 
 @Composable
-private fun PlanResult(pl: Plan) {
+private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit) {
     val c = LocalContext.current
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -371,6 +555,8 @@ private fun PlanResult(pl: Plan) {
         Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+
+    MealTime(pl, onShift, onNotEating)
 
     Card(Modifier.fillMaxWidth().padding(top = 10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {

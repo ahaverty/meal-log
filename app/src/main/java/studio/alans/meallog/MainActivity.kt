@@ -119,7 +119,7 @@ private fun App(route: Route, go: (Route) -> Unit) {
     val c = LocalContext.current
     val page = route.page
     val reminders = run { Reminders.version.collectAsState().value; Reminders.open(c) }
-    LaunchedEffect(Unit) { Reminders.sweep(c); Updater.check(c, force = false) }   // quiet; shows as a notification + in Settings
+    LaunchedEffect(Unit) { Reminders.sweep(c); Updater.check(c, force = false); QuickPicks.schedule(c); QuickPicks.refreshSoon(c) }   // quiet; shows as a notification + in Settings
     BackHandler(page == Page.Settings) { go(Route(Page.Plan)) }
 
     Scaffold(

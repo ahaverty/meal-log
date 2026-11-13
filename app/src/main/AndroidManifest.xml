@@ -89,6 +89,11 @@
             android:name=".ReminderReceiver"
             android:exported="false" />
 
+        <!-- Refreshes the cached usual meals every few hours. -->
+        <receiver
+            android:name=".QuickPicksReceiver"
+            android:exported="false" />
+
         <!-- Self-update install progress (asks the user to confirm). -->
         <receiver
             android:name=".Updater$InstallStatus"

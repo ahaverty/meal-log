@@ -112,6 +112,8 @@ class BolusReceiver : BroadcastReceiver() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (i.action == Intent.ACTION_BOOT_COMPLETED || i.action == Intent.ACTION_MY_PACKAGE_REPLACED) Reminders.restore(c)
+        if (i.action == Intent.ACTION_BOOT_COMPLETED || i.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            Reminders.restore(c); QuickPicks.schedule(c); QuickPicks.refreshSoon(c)
+        }
     }
 }

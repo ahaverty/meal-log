@@ -38,9 +38,16 @@ data class Step(val inMin: Int, val text: String, val cond: GlucoseCheck? = null
 data class Plan(val asked: String, val text: String, val session: String?, val eatInMin: Int?, val bolusInMin: Int?,
                 val bolusWhen: String, val carbs: Double?, val slowCarbs: Double?, val steps: List<Step>,
                 val summary: String, val madeAt: Long, val camaps: JSONObject? = null,
-                val menu: JSONObject? = null) {
+                val menu: JSONObject? = null,
+                /** He moved the meal (cooking took longer): every time in the plan moves by this much. */
+                val shiftMs: Long = 0) {
+    /** When [min] minutes into the plan falls, after any move. */
+    fun at(min: Int): Long = madeAt + shiftMs + min * 60_000L
+    /** When he planned to start eating. */
+    val eatAt: Long get() = at((eatInMin ?: 0).coerceAtLeast(0))
+
     fun json(): JSONObject = JSONObject().put("asked", asked).put("text", text).put("session", session)
-        .put("made_at", madeAt).put("extras", JSONObject().put("eat_in_min", eatInMin).put("bolus_in_min", bolusInMin)
+        .put("made_at", madeAt).put("shift_ms", shiftMs).put("extras", JSONObject().put("eat_in_min", eatInMin).put("bolus_in_min", bolusInMin)
             .put("bolus_when", bolusWhen).put("carbs", carbs).put("slow_carbs", slowCarbs).put("summary", summary)
             .put("reminders", JSONArray().apply { steps.forEach { put(JSONObject().put("in_min", it.inMin).put("text", it.text)
                 .put("if_glucose", it.cond?.json())) } })
@@ -57,7 +64,8 @@ data class Plan(val asked: String, val text: String, val session: String?, val e
                     it.optJSONObject("if_glucose")?.let { g -> GlucoseCheck.of(g.toString()) }) }
                     .filter { it.inMin > 0 && it.text.isNotBlank() },
                 x.optString("summary"), madeAt, x.optJSONObject("camaps"),
-                x.optJSONObject("menu")?.takeIf { (it.optJSONArray("picks")?.length() ?: 0) > 0 })
+                x.optJSONObject("menu")?.takeIf { (it.optJSONArray("picks")?.length() ?: 0) > 0 },
+                j.optLong("shift_ms", 0))
         }
     }
 }
@@ -140,6 +148,9 @@ class Api(c: Context) {
         }
         return Guesses(j.optString("meal_type"), gs, today)
     }
+
+    /** His usual meals for every two-hour slot of today in one call: {"slots": {"8": [{label, carbs, times}]}}. */
+    suspend fun picks(): JSONObject = call(req("/picks").build())
 
     suspend fun foods(q: String, at: Long): List<Food> =
         call(req("/foods", mapOf("q" to q, "at" to stamp(at))).build()).optJSONArray("foods").objects().map(Food::of)
