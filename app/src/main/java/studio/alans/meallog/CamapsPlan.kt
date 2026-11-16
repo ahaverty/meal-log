@@ -32,7 +32,7 @@ import kotlin.math.abs
 data class CamapsStep(
     val kind: Kind,
     val label: String,        // CamAPS menu words: "Bolus", "Add meal › Slowly absorbed meal", "Boost"
-    val value: String,        // the thing to type: "15 g", "20:30 – 22:30", "11:45"
+    val value: String,        // the thing to type: "15 g", "20:30 to 22:30", "11:45"
     val time: String?,        // when to do it, HH:MM
     val sub: String?,         // a few words: "at the first bite", "14 g carbs + 12 g fat/protein"
     val ifText: String? = null,   // check: "Under 5 and falling"
@@ -110,7 +110,7 @@ object Camaps {
             what.equals("Boost", true) || what.equals("Ease-off", true) -> {
                 val start = o.s("start"); val end = o.s("end")
                 val value = when {
-                    start != null && end != null -> "$start – $end"
+                    start != null && end != null -> "$start to $end"
                     end != null -> "until $end"
                     else -> start ?: "–"
                 }

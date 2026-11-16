@@ -88,6 +88,19 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -238,7 +251,7 @@ fun PlanScreen(start: PlanStart?) {
         }
         if (pl != null) {
             Text(if (pl.menu != null) "Something else?" else "Change this plan", style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 6.dp))
         }
         val canSend = text.isNotBlank() || photo != null
         val cs = MaterialTheme.colorScheme
@@ -298,7 +311,6 @@ fun PlanScreen(start: PlanStart?) {
         }
         if (pl != null) {
             PlanDetails(pl)
-            HorizontalDivider(Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
             OutlinedButton(onClick = { newMeal() }, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).height(52.dp)) {
                 Icon(Icons.Default.Add, null, Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
@@ -434,30 +446,32 @@ private fun UsualPicks(at: Long, onPick: (QuickPick) -> Unit) {
  * When the planned meal starts, with a way out when cooking runs long (Alan, 13 Nov: he tapped
  * Eating now, started cooking, and the reminders went off at the stove). +10 / +20 or a clock moves
  * the plan and every reminder it set; "Not eating after all" drops them.
+ * Since 16 Nov it is the header line of the CamAPS card (the time belongs with what to type), so it
+ * draws in the card's colours with no surface of its own.
  */
 @Composable
 private fun MealTime(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
+    val ink = LocalContentColor.current
     var picking by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-        Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(painterResource(R.drawable.ic_schedule), null, Modifier.size(22.dp), tint = cs.primary)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(if (pl.shiftMs != 0L) "Eating (moved)" else "Eating", style = MaterialTheme.typography.labelMedium,
-                    color = cs.onSurfaceVariant)
-                Text(Api.hhmm(pl.eatAt), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            Text("Later", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            TextButton(onClick = { onShift(10 * 60_000L) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+10") }
-            TextButton(onClick = { onShift(20 * 60_000L) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+20") }
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text("Pick a time") }, onClick = { menu = false; picking = true })
-                    DropdownMenuItem(text = { Text("Not eating after all") }, onClick = { menu = false; onNotEating() })
-                }
+    val later = ButtonDefaults.textButtonColors(contentColor = ink)
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(R.drawable.ic_schedule), null, Modifier.size(20.dp), tint = ink.copy(alpha = 0.8f))
+        Spacer(Modifier.width(8.dp))
+        Text("Eating ", style = MaterialTheme.typography.bodyLarge, color = ink.copy(alpha = 0.8f))
+        Text(Api.hhmm(pl.eatAt), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (pl.shiftMs != 0L) Text("  moved", style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.7f))
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = { onShift(10 * 60_000L) }, colors = later, contentPadding = PaddingValues(horizontal = 10.dp),
+            modifier = Modifier.semantics { contentDescription = "Eating 10 min later" }) { Text("+10", fontWeight = FontWeight.SemiBold) }
+        TextButton(onClick = { onShift(20 * 60_000L) }, colors = later, contentPadding = PaddingValues(horizontal = 10.dp),
+            modifier = Modifier.semantics { contentDescription = "Eating 20 min later" }) { Text("+20", fontWeight = FontWeight.SemiBold) }
+        Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More", tint = ink) }
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem(text = { Text("Pick a time") }, onClick = { menu = false; picking = true })
+                DropdownMenuItem(text = { Text("Not eating after all") }, onClick = { menu = false; onNotEating() })
             }
         }
     }
@@ -553,106 +567,115 @@ private fun arm(c: android.content.Context, pl: Plan) {
     }
 }
 
+/** The quiet card under the CamAPS card: outlined, no fill colour of its own, so the plan stays the one accent. */
+@Composable
+private fun QuietCard(content: @Composable () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainerLow, border = BorderStroke(1.dp, cs.outlineVariant),
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp)) { content() }
+    }
+}
+
 /** The planner's questions as tappable answers. One question sends on the tap; several collect the taps
- *  and send them together. A photo or weight ask gets its own button. */
+ *  and send them together. A photo or weight ask gets its own button. Sits right under the CamAPS card. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Questions(cv: CamapsView, onAnswer: (String) -> Unit, onPhoto: () -> Unit, onWeight: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     if (cv.asks.isEmpty() && cv.need == null) return
     var picked by remember(cv) { mutableStateOf(mapOf<Int, String>()) }
-    Card(Modifier.fillMaxWidth().padding(top = 12.dp),
-        colors = CardDefaults.cardColors(containerColor = cs.tertiaryContainer)) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(if (cv.rough) "Rough guess" + (cv.range?.let { ": $it" } ?: "") + ". Help me firm it up" else "To firm it up",
-                style = MaterialTheme.typography.labelLarge, color = cs.onTertiaryContainer)
-            cv.asks.forEachIndexed { i, a ->
-                Text(a.q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
-                    color = cs.onTertiaryContainer, modifier = Modifier.padding(top = 8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    a.options.forEach { o ->
-                        FilterChip(selected = picked[i] == o, label = { Text(o) }, onClick = {
-                            if (cv.asks.size == 1 && cv.need == null) onAnswer("${a.q} $o")
-                            else picked = if (picked[i] == o) picked - i else picked + (i to o)
-                        })
+    QuietCard {
+        if (cv.rough) {
+            Text("Rough guess" + (cv.range?.let { ": $it" } ?: ""), style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold)
+            Text("The plan works as it is. A tap or two firms it up.", style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant)
+        } else {
+            Text("To firm it up", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+        }
+        cv.asks.forEachIndexed { i, a ->
+            Text(a.q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = if (i == 0 && !cv.rough) 2.dp else 10.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                a.options.forEach { o ->
+                    FilterChip(selected = picked[i] == o, label = { Text(o) }, onClick = {
+                        if (cv.asks.size == 1 && cv.need == null) onAnswer("${a.q} $o")
+                        else picked = if (picked[i] == o) picked - i else picked + (i to o)
+                    }, modifier = Modifier.heightIn(min = 40.dp))
+                }
+            }
+        }
+        val need = cv.need
+        val many = cv.asks.size > 1 || (cv.asks.isNotEmpty() && need != null)
+        if (need != null || many) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (need != null) {
+                    if (need.startsWith("photo", true)) OutlinedButton(onClick = onPhoto) {
+                        Icon(painterResource(R.drawable.sc_camera), null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add a photo")
+                    }
+                    else OutlinedButton(onClick = { onWeight(need) }) {
+                        Text("Give the ${need.removePrefix("weight of ").let { "weight of $it" }}", maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
                     }
                 }
-            }
-            val need = cv.need
-            if (need != null) {
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (need.startsWith("photo", true)) OutlinedButton(onClick = onPhoto) { Text("Add a photo") }
-                    else OutlinedButton(onClick = { onWeight(need) }) { Text("Give the ${need.removePrefix("weight of ").let { "weight of $it" }}") }
-                }
-            }
-            if (cv.asks.size > 1 || (cv.asks.isNotEmpty() && cv.need != null)) {
-                Button(onClick = {
+                Spacer(Modifier.weight(1f).widthIn(min = 8.dp))
+                if (many) FilledTonalButton(onClick = {
                     onAnswer(cv.asks.mapIndexedNotNull { i, a -> picked[i]?.let { "${a.q} $it" } }.joinToString(" "))
-                }, enabled = picked.isNotEmpty(), modifier = Modifier.padding(top = 8.dp)) { Text("Update the plan") }
+                }, enabled = picked.isNotEmpty()) { Text("Update the plan") }
             }
         }
     }
 }
 
+/**
+ * The plan, calm (Alan, 16 Nov 2026: "it's still overwhelming often"). One accent block: the CamAPS
+ * card, with the eating time as its header, the bolus grams as the biggest thing on the page, the
+ * other steps as quiet rows and Open CamAPS inside it. Questions sit right under it in a plain
+ * outlined card. Reminders and the breakdown are behind Details further down ([PlanDetails]).
+ */
 @Composable
 private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit, onAnswer: (String) -> Unit = {},
                        onPhoto: () -> Unit = {}, onWeight: (String) -> Unit = {}) {
     val c = LocalContext.current
+    val cs = MaterialTheme.colorScheme
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
-            maxLines = 2, modifier = Modifier.weight(1f))
-        PlannedAt(pl)
-    }
-    val facts = listOfNotNull(cv.glucose?.let { "Glucose $it" }, cv.mealType?.let { "$it meal" })
-    if (facts.isNotEmpty()) {
-        Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+        maxLines = 2, overflow = TextOverflow.Ellipsis)
+    val facts = listOfNotNull(cv.glucose?.let { "Glucose $it" }, cv.mealType?.let { "$it meal" }, "planned ${Api.hhmm(pl.madeAt)}")
+    Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp))
 
-    MealTime(pl, onShift, onNotEating)
-    // A rough guess asks first, above the entry; otherwise any question waits at the bottom.
-    if (cv.rough) Questions(cv, onAnswer, onPhoto, onWeight)
-
-    Card(Modifier.fillMaxWidth().padding(top = 10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Column(Modifier.padding(vertical = 6.dp)) {
-            Text("IN CAMAPS", style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+    val eat = Api.hhmm(pl.eatAt)
+    Surface(shape = RoundedCornerShape(24.dp), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Column(Modifier.padding(bottom = 16.dp)) {
+            MealTime(pl, onShift, onNotEating)
             cv.steps.forEachIndexed { i, st ->
-                if (i > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                StepRow(i + 1, st)
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = cs.onPrimaryContainer.copy(alpha = 0.14f))
+                if (i == 0 && st.kind == CamapsStep.Kind.Bolus) BolusHero(st, eat) else StepRow(st, eat)
+            }
+            Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
+                Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
             }
         }
     }
-    Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
-        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(52.dp)) {
-        Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
-    }
     msg?.let {
         Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            color = cs.error, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
     }
 
-    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 && it.meal == 0L }
-    if (mine.isNotEmpty()) {
-        Text("Reminders", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
-        mine.forEach { r -> ReminderRow(r) }
-    }
-
-    if (!cv.rough && cv.asks.isNotEmpty()) Questions(cv, onAnswer, onPhoto, onWeight)
-    else if (cv.asks.isEmpty() && cv.need == null) cv.question?.let { q ->
-        Card(Modifier.fillMaxWidth().padding(top = 14.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("To firm it up", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer)
-                Text(q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer)
-            }
+    if (cv.asks.isNotEmpty() || cv.need != null) Questions(cv, onAnswer, onPhoto, onWeight)
+    else cv.question?.let { q ->
+        QuietCard {
+            Text("To firm it up", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            Text(q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -671,13 +694,10 @@ private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> 
     (0 until picks.length()).forEach { i ->
         val k = picks.getJSONObject(i)
         val order = k.optString("order").ifBlank { k.optString("name") }
+        // Calmer picks (16 Nov): plain cards, the best one first, no numbered circles.
         Card(modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh)) {
+            colors = CardDefaults.cardColors(containerColor = if (i == 0) cs.surfaceContainerHigh else cs.surfaceContainer)) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(26.dp).clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
-                    Text("${i + 1}", color = cs.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(k.optString("name").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold)
@@ -686,7 +706,7 @@ private fun MenuPicks(pl: Plan, onPick: (String) -> Unit, onChange: (String) -> 
                         if (k.has("carbs") && !k.isNull("carbs")) "~${k.optInt("carbs")} g carbs" else null,
                         k.optString("meal_type").takeIf { it.isNotBlank() }?.let { "$it meal" })
                     if (facts.isNotEmpty()) Text(facts.joinToString("  ·  "), style = MaterialTheme.typography.titleSmall,
-                        color = cs.primary)
+                        color = cs.onSurfaceVariant)
                     k.optString("why").takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     }
@@ -711,89 +731,167 @@ private fun PlannedAt(pl: Plan) {
         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
 }
 
-/** One CamAPS step: the menu words, the number to type (big), when, and a few words. */
+/** The bolus, the one number that matters most: grams big, when in words beside it. */
 @Composable
-private fun StepRow(n: Int, st: CamapsStep) {
-    val cs = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.size(26.dp).clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
-            Text("$n", color = cs.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+private fun BolusHero(st: CamapsStep, eat: String) {
+    val ink = LocalContentColor.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(st.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                color = ink.copy(alpha = 0.8f), modifier = Modifier.weight(1f))
+            // only when it isn't the eating time already shown above
+            st.time?.takeIf { it != eat }?.let {
+                Text("at $it", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(st.label, style = MaterialTheme.typography.titleSmall, color = cs.primary,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                if (st.kind != CamapsStep.Kind.Check && st.time != null) {
-                    Text(st.time, style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
-                }
-            }
-            when (st.kind) {
-                CamapsStep.Kind.Bolus, CamapsStep.Kind.AddMeal -> Row(verticalAlignment = Alignment.Bottom) {
-                    Text("Carbs ", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 4.dp))
-                    Text(st.value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                }
-                CamapsStep.Kind.Other -> if (st.value.isNotBlank()) Text(st.value, style = MaterialTheme.typography.titleMedium)
-                else -> Text(st.value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            }
-            st.sub?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
-            if (st.ifText != null || st.thenText != null) {
-                Column(Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(cs.errorContainer).padding(horizontal = 10.dp, vertical = 8.dp)) {
-                    st.ifText?.let {
-                        Text("If " + it.replaceFirstChar { ch -> ch.lowercase() }, style = MaterialTheme.typography.labelLarge,
-                            color = cs.onErrorContainer)
-                    }
-                    st.thenText?.let {
-                        Text(it, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold,
-                            color = cs.onErrorContainer)
-                    }
-                }
+        Row(Modifier.padding(top = 2.dp)) {
+            Text(st.value, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold,
+                modifier = Modifier.alignByBaseline())
+            st.sub?.let {
+                Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.alignByBaseline().padding(start = 12.dp))
             }
         }
     }
 }
 
-/** The planner's reasoning (classification, breakdown, ratio note), folded away under the plan. */
+/** "not Meal or snack" (from [Camaps]) is pulled out of a slow step's words to show as its own badge. */
+private const val NOT_MEAL = "not Meal or snack"
+
+/**
+ * One CamAPS step as a quiet row: the menu words on the left, the thing to type on the right. A slow
+ * meal keeps its "Not Meal or snack" badge (11 and 13 Nov: picking Meal or snack led to lows). A
+ * glucose check carries its "If ...: then" line in bold words instead of a coloured box.
+ */
+@Composable
+private fun StepRow(st: CamapsStep, eat: String) {
+    val ink = LocalContentColor.current
+    val parts = st.sub?.split(" · ").orEmpty()
+    val slow = parts.any { it.equals(NOT_MEAL, true) }
+    val words = parts.filterNot { it.equals(NOT_MEAL, true) }.toMutableList()
+    if (st.kind == CamapsStep.Kind.AddMeal) st.time?.takeIf { it != eat }?.let { words.add(0, "at $it") }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(st.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+            if (slow) {
+                Text("Not Meal or snack", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 4.dp).border(1.5.dp, ink, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp))
+            }
+            if (words.isNotEmpty()) {
+                Text(words.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = ink.copy(alpha = 0.78f),
+                    modifier = Modifier.padding(top = 2.dp))
+            }
+            if (st.ifText != null || st.thenText != null) {
+                Text(buildAnnotatedString {
+                    st.ifText?.let {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("If " + it.replaceFirstChar { ch -> ch.lowercase() } + if (st.thenText != null) ": " else "")
+                        }
+                    }
+                    st.thenText?.let { append(it) }
+                }, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+        val value = st.value.takeIf { it.isNotBlank() && it != "–" }
+        if (value != null) {
+            Spacer(Modifier.width(12.dp))
+            Text(value, fontWeight = FontWeight.Bold, style = when (st.kind) {
+                CamapsStep.Kind.Bolus, CamapsStep.Kind.AddMeal -> MaterialTheme.typography.headlineSmall
+                CamapsStep.Kind.Other -> MaterialTheme.typography.titleMedium
+                else -> MaterialTheme.typography.titleLarge
+            })
+        }
+    }
+}
+
+/**
+ * Everything secondary behind one row: this plan's reminders and the planner's reasoning
+ * (classification, breakdown, ratio note). Closed, it still says when the next reminder is, and
+ * turns red when one is ringing or was missed.
+ */
 @Composable
 private fun PlanDetails(pl: Plan) {
+    val c = LocalContext.current
+    val cs = MaterialTheme.colorScheme
     val blocks = pl.text.replace("**", "").split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
         // Never show the planner's raw JSON line, even if the server couldn't read it (12 Nov).
         .filterNot { it.startsWith("{") && it.endsWith("}") }
     val structured = (pl.camaps?.optJSONArray("steps")?.length() ?: 0) > 0
     // With steps from the planner the "CamAPS entry" block is already shown above as steps.
     val rest = if (structured) blocks.filterNot { it.startsWith("CamAPS", ignoreCase = true) } else blocks
-    if (rest.isEmpty()) return
+    val mine = Reminders.all(c).filter { it.setAt >= pl.madeAt - 5000 && it.meal == 0L }
+    if (rest.isEmpty() && mine.isEmpty()) return
+    // An old plan without steps has only the breakdown to show, so it starts open.
     var open by remember(pl) { mutableStateOf(!structured && pl.menu == null) }
-    TextButton(onClick = { open = !open }, modifier = Modifier.padding(top = 8.dp)) {
-        Text(if (open) "Hide breakdown" else "Breakdown and why")
+    val now = System.currentTimeMillis()
+    val live = mine.filter { it.open }.sortedBy { it.at }
+    val urgent = when {
+        live.any { it.at <= now } -> "A reminder is ringing"
+        mine.any { it.state == Reminder.MISSED } -> "A reminder was missed"
+        else -> null
     }
-    if (open) rest.forEach { b ->
-        Text(b, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 6.dp, start = 4.dp))
+    val summary = listOfNotNull(
+        urgent ?: when {
+            live.isNotEmpty() -> "${live.size} reminder${if (live.size > 1) "s" else ""}, next ${Api.hhmm(live.first().at)}"
+            mine.isNotEmpty() -> "Reminders done"
+            else -> null
+        },
+        if (rest.isNotEmpty()) "breakdown and why" else null,
+    ).joinToString("  ·  ").replaceFirstChar { it.uppercase() }
+
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Column {
+            Row(Modifier.fillMaxWidth().clickable { open = !open }.heightIn(min = 56.dp)
+                .padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(summary, style = MaterialTheme.typography.bodySmall,
+                        color = if (urgent != null) cs.error else cs.onSurfaceVariant)
+                }
+                Icon(if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    if (open) "Hide details" else "Show details", tint = cs.onSurfaceVariant)
+            }
+            if (open) Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                mine.forEach { r -> ReminderRow(r, now, quiet = true) }
+                if (mine.isNotEmpty() && rest.isNotEmpty()) {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp), color = cs.outlineVariant)
+                }
+                rest.forEach { b ->
+                    Text(b, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp))
+                }
+            }
+        }
     }
 }
 
+/** A reminder. [quiet] draws open ones without a colour fill (inside the plan's Details); missed stays red. */
 @Composable
-fun ReminderRow(r: Reminder, now: Long = System.currentTimeMillis()) {
+fun ReminderRow(r: Reminder, now: Long = System.currentTimeMillis(), quiet: Boolean = false) {
     val c = LocalContext.current
     val closed = !r.open
+    val cs = MaterialTheme.colorScheme
+    val ink = when {
+        closed -> cs.onSurfaceVariant
+        quiet -> cs.onSurface
+        else -> cs.onSecondaryContainer
+    }
     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp),
         colors = CardDefaults.cardColors(containerColor = when {
-            r.state == Reminder.MISSED -> MaterialTheme.colorScheme.errorContainer
-            closed -> MaterialTheme.colorScheme.surfaceContainer
-            else -> MaterialTheme.colorScheme.secondaryContainer
+            r.state == Reminder.MISSED -> cs.errorContainer
+            closed -> cs.surfaceContainer
+            quiet -> cs.surfaceContainerHigh
+            else -> cs.secondaryContainer
         })) {
         Row(Modifier.padding(start = 16.dp, top = 6.dp, bottom = 6.dp, end = if (closed) 16.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(Api.hhmm(r.at), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.width(60.dp),
-                color = if (closed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer)
+                modifier = Modifier.width(60.dp), color = ink)
             Column(Modifier.weight(1f)) {
                 Text(Reminders.title(r), style = MaterialTheme.typography.bodyLarge, maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (closed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer)
+                    overflow = TextOverflow.Ellipsis, color = ink)
                 Text(status(r, now), style = MaterialTheme.typography.bodySmall,
                     color = if (r.state == Reminder.MISSED) MaterialTheme.colorScheme.onErrorContainer
                         else MaterialTheme.colorScheme.onSurfaceVariant)
