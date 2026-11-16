@@ -41,7 +41,19 @@ data class CamapsStep(
     enum class Kind { Bolus, AddMeal, Mode, Check, Other }
 }
 
-data class CamapsView(val glucose: String?, val mealType: String?, val steps: List<CamapsStep>, val question: String?)
+data class CamapsView(val glucose: String?, val mealType: String?, val steps: List<CamapsStep>, val question: String?,
+                      /** high / medium / low, worked out by the planner server from the carbs range. */
+                      val confidence: String? = null,
+                      /** "40 to 75 g" */
+                      val range: String? = null,
+                      /** Tappable questions (0-3); low confidence always has some. */
+                      val asks: List<Ask> = emptyList(),
+                      /** "photo" or "weight of the rice" when that would settle it. */
+                      val need: String? = null) {
+    val rough: Boolean get() = confidence == "low"
+}
+
+data class Ask(val q: String, val options: List<String>)
 
 object Camaps {
     /** CamAPS FX builds (mmol/L and mg/dL, original and HX/Ypso). */
@@ -59,9 +71,28 @@ object Camaps {
             val arr = j.optJSONArray("steps")
             val steps = (0 until (arr?.length() ?: 0)).mapNotNull { i -> arr!!.optJSONObject(i)?.let(::step) }
             if (steps.isNotEmpty()) return CamapsView(j.s("glucose"), j.s("meal_type"),
-                if (pl.shiftMs == 0L) steps else steps.map { moved(it, pl.shiftMs) }, j.s("question"))
+                if (pl.shiftMs == 0L) steps else steps.map { moved(it, pl.shiftMs) }, j.s("question"),
+                j.s("confidence"), range(j), asks(j), j.s("need"))
         }
         return fallback(pl)
+    }
+
+    private fun range(j: JSONObject): String? {
+        val r = j.optJSONArray("carbs_range") ?: return null
+        if (r.length() != 2) return null
+        val lo = r.optDouble(0); val hi = r.optDouble(1)
+        if (lo.isNaN() || hi.isNaN()) return null
+        return "${lo.toInt()} to ${hi.toInt()} g"
+    }
+
+    private fun asks(j: JSONObject): List<Ask> {
+        val arr = j.optJSONArray("questions") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val q = o.s("q") ?: return@mapNotNull null
+            val opts = o.optJSONArray("options")
+            Ask(q, (0 until (opts?.length() ?: 0)).mapNotNull { k -> opts!!.optString(k).trim().ifBlank { null } }.take(4))
+        }.take(3)
     }
 
     private fun step(o: JSONObject): CamapsStep? {
@@ -69,8 +100,13 @@ object Camaps {
         val at = o.s("at")
         return when {
             what.equals("Bolus", true) -> CamapsStep(CamapsStep.Kind.Bolus, "Bolus", o.d("carbs")?.let(::g) ?: "–", at, o.s("when"))
-            what.startsWith("Add meal", true) -> CamapsStep(CamapsStep.Kind.AddMeal,
-                "Add meal › " + (o.s("type") ?: "Meal or snack"), o.d("carbs")?.let(::g) ?: "–", at, o.s("note")?.let(::menu))
+            what.startsWith("Add meal", true) -> {
+                val type = o.s("type") ?: "Meal or snack"
+                // 11 and 13 Nov 2026: the slow part went in as Meal or snack twice, both followed by lows.
+                val slow = type.startsWith("Slowly", true)
+                CamapsStep(CamapsStep.Kind.AddMeal, "Add meal › $type", o.d("carbs")?.let(::g) ?: "–", at,
+                    listOfNotNull(if (slow) "not Meal or snack" else null, o.s("note")?.let(::menu)).joinToString(" · ").ifBlank { null })
+            }
             what.equals("Boost", true) || what.equals("Ease-off", true) -> {
                 val start = o.s("start"); val end = o.s("end")
                 val value = when {

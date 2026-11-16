@@ -213,7 +213,13 @@ fun PlanScreen(start: PlanStart?) {
                 field = TextFieldValue(t, TextRange(t.length))
                 scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
             })
-            else PlanResult(pl, onShift = ::shift, onNotEating = ::notEating)
+            else PlanResult(pl, onShift = ::shift, onNotEating = ::notEating, onAnswer = { send(it) },
+                onPhoto = { camera.launch(shot.first) },
+                onWeight = { what ->
+                    val t = "${what.replaceFirstChar { it.uppercase() }}: "
+                    field = TextFieldValue(t, TextRange(t.length))
+                    scope.launch { kotlinx.coroutines.delay(100); runCatching { focus.requestFocus() } }
+                })
             Spacer(Modifier.height(12.dp))
         }
 
@@ -537,10 +543,60 @@ private fun arm(c: android.content.Context, pl: Plan) {
         else Reminders.add(c, 10, "$what (did you bolus?)", bolus = true)
     }
     pl.steps.forEach { Reminders.add(c, it.inMin, it.text, bolus = false, cond = it.cond ?: GlucoseCheck.parse(it.text)) }
+    // A rough guess pushes for more (Alan, 16 Nov 2026): a quiet nudge a few minutes before he eats if he
+    // hasn't answered. Answering replaces the plan, which cancels this with the plan's other reminders.
+    val cv = Camaps.view(pl)
+    if (cv.rough && (cv.asks.isNotEmpty() || cv.need != null)) {
+        val inMin = ((pl.eatInMin ?: 0) - 2).coerceIn(3, 10)
+        Reminders.add(c, inMin, "Rough guess so far" + (cv.range?.let { " ($it)" } ?: "") +
+            ". A couple of taps on the Plan page would firm it up.", bolus = false, cond = null)
+    }
+}
+
+/** The planner's questions as tappable answers. One question sends on the tap; several collect the taps
+ *  and send them together. A photo or weight ask gets its own button. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Questions(cv: CamapsView, onAnswer: (String) -> Unit, onPhoto: () -> Unit, onWeight: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    if (cv.asks.isEmpty() && cv.need == null) return
+    var picked by remember(cv) { mutableStateOf(mapOf<Int, String>()) }
+    Card(Modifier.fillMaxWidth().padding(top = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.tertiaryContainer)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(if (cv.rough) "Rough guess" + (cv.range?.let { ": $it" } ?: "") + ". Help me firm it up" else "To firm it up",
+                style = MaterialTheme.typography.labelLarge, color = cs.onTertiaryContainer)
+            cv.asks.forEachIndexed { i, a ->
+                Text(a.q, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
+                    color = cs.onTertiaryContainer, modifier = Modifier.padding(top = 8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    a.options.forEach { o ->
+                        FilterChip(selected = picked[i] == o, label = { Text(o) }, onClick = {
+                            if (cv.asks.size == 1 && cv.need == null) onAnswer("${a.q} $o")
+                            else picked = if (picked[i] == o) picked - i else picked + (i to o)
+                        })
+                    }
+                }
+            }
+            val need = cv.need
+            if (need != null) {
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (need.startsWith("photo", true)) OutlinedButton(onClick = onPhoto) { Text("Add a photo") }
+                    else OutlinedButton(onClick = { onWeight(need) }) { Text("Give the ${need.removePrefix("weight of ").let { "weight of $it" }}") }
+                }
+            }
+            if (cv.asks.size > 1 || (cv.asks.isNotEmpty() && cv.need != null)) {
+                Button(onClick = {
+                    onAnswer(cv.asks.mapIndexedNotNull { i, a -> picked[i]?.let { "${a.q} $it" } }.joinToString(" "))
+                }, enabled = picked.isNotEmpty(), modifier = Modifier.padding(top = 8.dp)) { Text("Update the plan") }
+            }
+        }
+    }
 }
 
 @Composable
-private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit) {
+private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Unit, onAnswer: (String) -> Unit = {},
+                       onPhoto: () -> Unit = {}, onWeight: (String) -> Unit = {}) {
     val c = LocalContext.current
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -557,6 +613,8 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
     }
 
     MealTime(pl, onShift, onNotEating)
+    // A rough guess asks first, above the entry; otherwise any question waits at the bottom.
+    if (cv.rough) Questions(cv, onAnswer, onPhoto, onWeight)
 
     Card(Modifier.fillMaxWidth().padding(top = 10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
@@ -585,7 +643,8 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
         mine.forEach { r -> ReminderRow(r) }
     }
 
-    cv.question?.let { q ->
+    if (!cv.rough && cv.asks.isNotEmpty()) Questions(cv, onAnswer, onPhoto, onWeight)
+    else if (cv.asks.isEmpty() && cv.need == null) cv.question?.let { q ->
         Card(Modifier.fillMaxWidth().padding(top = 14.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
