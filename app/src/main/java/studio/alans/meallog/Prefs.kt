@@ -76,4 +76,12 @@ class Prefs(c: Context) {
     var planCarbs: Float
         get() = p.getFloat("plan_carbs", -1f)
         set(v) = p.edit().putFloat("plan_carbs", v).apply()
+
+    /** CamAPS Add meal carbs that belong to a meal bolus not seen yet (slow part entered first). */
+    var addMealAt: Long
+        get() = p.getLong("add_meal_at", 0)
+        set(v) = p.edit().putLong("add_meal_at", v).apply()
+    var addMealCarbs: Float
+        get() = p.getFloat("add_meal_carbs", 0f)
+        set(v) = p.edit().putFloat("add_meal_carbs", v).apply()
 }

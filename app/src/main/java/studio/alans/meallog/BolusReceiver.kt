@@ -31,12 +31,14 @@ class BolusReceiver : BroadcastReceiver() {
         p.lastBolusUnits = units.toFloat()
         p.lastBolusCarbs = (carbs ?: -1.0).toFloat()
         Reminders.bolusSeen(c, at)
-        if (!p.askAfterBolus || carbs == null || carbs < p.minCarbs) return
+        // A slow part entered before this bolus is the same meal: fold it in (no second ask).
+        val extra = MealParts.takeBefore(c, at)
+        if (!p.askAfterBolus || carbs == null || carbs + extra < p.minCarbs) return
         if (p.handledBolus == at) return
         p.handledBolus = at
-        // Matches the meal planned in the Plan tab: log it without asking.
+        // Matches the meal planned in the Plan tab: log it without asking (bolus carbs vs planned bolus carbs).
         if (PlanAutoLog.tryLog(c, at, carbs) { goAsync() }) return
-        open(c, at, units, carbs)
+        open(c, at, units, carbs + extra)
     }
 
     /**
@@ -68,6 +70,9 @@ class BolusReceiver : BroadcastReceiver() {
         }
         // Same carbs as a meal bolus just now: the bolus already asked.
         if (kotlin.math.abs(p.lastBolusAt - at) < 15 * 60_000L && p.lastBolusCarbs >= p.minCarbs) return
+        // Slowly absorbed meal (or a planned Add meal part) goes with a meal bolus, before or after it
+        // (Alan, 17 Nov 2026): never its own sheet. The bolus asks once for the whole meal.
+        if (MealParts.partOfMeal(c, type, at, g)) return
         if (!p.askAfterBolus) return Reminders.logLater(c, at, g, inMin = 1)
         open(c, at, 0.0, g)
     }
