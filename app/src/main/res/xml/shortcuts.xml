@@ -15,6 +15,11 @@
         <intent android:action="android.intent.action.VIEW" android:data="meallog://log"
             android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
     </shortcut>
+    <shortcut android:shortcutId="drinks" android:enabled="true" android:icon="@drawable/sc_drink"
+        android:shortcutShortLabel="@string/sc_drinks" android:shortcutLongLabel="@string/sc_drinks_long">
+        <intent android:action="android.intent.action.VIEW" android:data="meallog://drinks"
+            android:targetPackage="studio.alans.meallog" android:targetClass="studio.alans.meallog.MainActivity" />
+    </shortcut>
     <shortcut android:shortcutId="remind" android:enabled="true" android:icon="@drawable/sc_alarm"
         android:shortcutShortLabel="@string/sc_remind" android:shortcutLongLabel="@string/sc_remind_long">
         <intent android:action="android.intent.action.VIEW" android:data="meallog://remind?min=15"

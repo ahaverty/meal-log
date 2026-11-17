@@ -66,7 +66,7 @@ import kotlinx.coroutines.launch
  * and nothing that skips or postpones ever goes there. Not now = the X or Back only.
  */
 @Composable
-fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: (Boolean) -> Unit) {
+fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDrink: () -> Unit = {}, onDone: (Boolean) -> Unit) {
     val c = LocalContext.current
     val api = remember { Api(c) }
     val scope = rememberCoroutineScope()
@@ -104,7 +104,14 @@ fun MealPanel(at: Long, carbs: Double?, units: Double?, sheet: Boolean, onDone: 
         keyboard?.hide()
         scope.launch {
             runCatching { api.log(items, at).also { if (extra != null) api.text(extra, at) } }
-                .onSuccess { done = it; plate.clear(); query = ""; if (it.entryIds.isNotEmpty() || it.problems.isEmpty()) markLogged() }
+                .onSuccess {
+                    done = it; plate.clear(); query = ""; if (it.entryIds.isNotEmpty() || it.problems.isEmpty()) markLogged()
+                    // a pint logged here starts drinks mode: the count picks it up from the diary
+                    if (!sheet && items.any { f -> Drinks.looksLikeAlcohol(f.name) }) {
+                        runCatching { Drinks.refresh(c) }
+                        if (Drinks.active(c)) onDrink()
+                    }
+                }
                 .onFailure { error = it.message }
             busy = false
         }

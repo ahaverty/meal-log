@@ -200,6 +200,19 @@ class Api(c: Context) {
         return Glucose(j.getDouble("mmol"), j.optInt("age_min", 99), j.optDouble("delta15", 0.0))
     }
 
+    /** Drinks mode: his usual drinks (one serving each) + soft ones, and what's logged tonight. */
+    suspend fun drinks(): JSONObject = call(req("/drinks").build())
+
+    /** Logs [quantity] of one drink at [at] (instant, no Claude). Returns the new diary entry ids for Undo. */
+    suspend fun drink(d: Drink, quantity: Int, at: Long): List<String> {
+        val j = JSONObject().put("quantity", quantity).put("at", stamp(at))
+        if (d.foodId != null) j.put("food_id", d.foodId).put("unit", d.unit) else j.put("key", d.key)
+        return call(post("/drink", j)).optJSONArray("entry_ids").strings()
+    }
+
+    /** The last 24 h of carbs, protein, fat and sat fat against his nutrition-system goals. */
+    suspend fun nutrients(): JSONObject = call(req("/nutrients").build())
+
     suspend fun skip(at: Long) {
         call(post("/skip", JSONObject().put("at", stamp(at))))
     }
@@ -210,8 +223,8 @@ class Api(c: Context) {
     }
 }
 
-private fun JSONArray?.objects(): List<JSONObject> =
+internal fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
-private fun JSONArray?.strings(): List<String> =
+internal fun JSONArray?.strings(): List<String> =
     if (this == null) emptyList() else (0 until length()).map { getString(it) }

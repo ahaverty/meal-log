@@ -218,6 +218,7 @@ fun PlanScreen(start: PlanStart?) {
             if (!busy) {
                 Text(askFor(System.currentTimeMillis() + eatIn * 60_000L), style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 14.dp))
+                NutrientStrip()
             }
         } else {
             if (pl.menu != null) MenuPicks(pl, onPick = { send("I'll have: $it") }, onChange = {

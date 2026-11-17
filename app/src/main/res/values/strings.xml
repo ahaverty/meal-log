@@ -6,6 +6,8 @@
     <string name="sc_photo_long">Photograph a plate or menu</string>
     <string name="sc_log">Log food</string>
     <string name="sc_log_long">Log what you ate</string>
+    <string name="sc_drinks">Drinks</string>
+    <string name="sc_drinks_long">Log a drink</string>
     <string name="sc_remind">Bolus in 15 min</string>
     <string name="sc_remind_long">Remind me to bolus in 15 min</string>
 </resources>

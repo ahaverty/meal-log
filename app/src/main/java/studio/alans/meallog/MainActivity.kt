@@ -66,10 +66,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-enum class Page(val title: String) { Plan("Plan a meal"), Log("Log food"), Reminders("Reminders"), Settings("Settings") }
+enum class Page(val title: String) { Plan("Plan a meal"), Log("Log food"), Drinks("Drinks tonight"), Reminders("Reminders"), Settings("Settings") }
 
 /** Where to open: a page, plus what a link or shortcut brought. n changes on every open, so the same link reopens. */
-data class Route(val page: Page, val plan: PlanStart? = null, val install: Boolean = false, val n: Long = System.nanoTime())
+data class Route(val page: Page, val plan: PlanStart? = null, val install: Boolean = false, val n: Long = System.nanoTime(),
+                 /** Opened plainly (launcher icon): free to jump to Drinks if a night turns out to be on. */
+                 val auto: Boolean = false)
 
 /**
  * Plan (default), Log and Reminders, Settings behind the gear. meallog:// links and the launcher
@@ -96,10 +98,15 @@ class MainActivity : ComponentActivity() {
         val u = i?.data
         if (i?.action == Updater.ACTION_INSTALL) return Route(Page.Settings, install = true)
         if (u?.scheme != "meallog") {
-            return Route(if (Prefs(this).unloggedBolus() > 0) Page.Log else Page.Plan)
+            return when {
+                Prefs(this).unloggedBolus() > 0 -> Route(Page.Log)
+                Drinks.active(this) -> Route(Page.Drinks)   // a night out: straight to the count
+                else -> Route(Page.Plan, auto = true)
+            }
         }
         return when (u.host) {
             "log" -> Route(Page.Log)
+            "drinks" -> Route(Page.Drinks)
             "reminders" -> Route(Page.Reminders)
             "settings" -> Route(Page.Settings)
             "remind" -> {
@@ -120,6 +127,12 @@ private fun App(route: Route, go: (Route) -> Unit) {
     val page = route.page
     val reminders = run { Reminders.version.collectAsState().value; Reminders.open(c) }
     LaunchedEffect(Unit) { Reminders.sweep(c); Updater.check(c, force = false); QuickPicks.schedule(c); QuickPicks.refreshSoon(c) }   // quiet; shows as a notification + in Settings
+    // A drink logged by voice or the web app starts a night too: the plain open moves on to Drinks.
+    LaunchedEffect(route.n) {
+        if (Drinks.pending(c)) Drinks.flush(c)
+        if (route.auto && runCatching { Drinks.refresh(c) }.getOrDefault(false)) go(Route(Page.Drinks))
+    }
+    val drinksOn = run { Drinks.version.collectAsState().value; Drinks.active(c) }
     BackHandler(page == Page.Settings) { go(Route(Page.Plan)) }
 
     Scaffold(
@@ -146,6 +159,12 @@ private fun App(route: Route, go: (Route) -> Unit) {
                     icon = {
                         BadgedBox(badge = { if (Prefs(c).unloggedBolus() > 0) Badge() }) { Icon(painterResource(R.drawable.sc_log), null) }
                     }, label = { Text("Log") })
+                NavigationBarItem(page == Page.Drinks, { go(Route(Page.Drinks)) },
+                    icon = {
+                        BadgedBox(badge = { if (drinksOn) Badge { Text("${Drinks.alcoholCount(Drinks.had(c))}") } }) {
+                            Icon(painterResource(R.drawable.sc_drink), null)
+                        }
+                    }, label = { Text("Drinks") })
                 NavigationBarItem(page == Page.Reminders, { go(Route(Page.Reminders)) },
                     icon = {
                         BadgedBox(badge = { if (reminders.isNotEmpty()) Badge { Text("${reminders.size}") } }) {   // open ones only
@@ -159,7 +178,8 @@ private fun App(route: Route, go: (Route) -> Unit) {
             key(route.n) {
                 when (page) {
                     Page.Plan -> PlanScreen(route.plan)
-                    Page.Log -> LogPage()
+                    Page.Log -> LogPage { go(Route(Page.Drinks)) }
+                    Page.Drinks -> DrinksScreen()
                     Page.Reminders -> RemindersPage(reminders)
                     Page.Settings -> SettingsScreen(autoInstall = route.install)
                 }
@@ -171,7 +191,7 @@ private fun App(route: Route, go: (Route) -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LogPage() {
+private fun LogPage(onDrink: () -> Unit) {
     val c = LocalContext.current
     val p = remember { Prefs(c) }
     val openedAt = remember { System.currentTimeMillis() }
@@ -187,8 +207,8 @@ private fun LogPage() {
             }
         }
         key(forBolus) {
-            if (forBolus) MealPanel(bolusAt, p.lastBolusCarbs.toDouble(), p.lastBolusUnits.toDouble(), sheet = false) { }
-            else MealPanel(openedAt, null, null, sheet = false) { }
+            if (forBolus) MealPanel(bolusAt, p.lastBolusCarbs.toDouble(), p.lastBolusUnits.toDouble(), sheet = false, onDrink = onDrink) { }
+            else MealPanel(openedAt, null, null, sheet = false, onDrink = onDrink) { }
         }
     }
 }
