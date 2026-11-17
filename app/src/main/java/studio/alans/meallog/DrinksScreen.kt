@@ -146,19 +146,24 @@ fun DrinksScreen() {
             }
         }
 
-        // Pick a different drink: one tap logs it and it becomes the repeat.
-        val alc = cat.filter { !it.soft }
+        // Pick a different drink: one tap logs it and it becomes the repeat. Once he's at his plan,
+        // the soft ones come first.
+        val alc = cat.filter { !it.soft }.take(5)
         val soft = cat.filter { it.soft }
-        if (alc.isNotEmpty()) {
-            Label("Something else")
+        @Composable fun alcRow() {
+            if (alc.isEmpty()) return
+            Label(if (had.isEmpty()) "Your drinks" else "Something else")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 alc.forEach { d -> DrinkChip(d, d.id == current?.id) { Drinks.add(c, d) } }
             }
         }
-        Label(if (alcohol >= limit) "Switch to" else "Soft and 0.0")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            soft.forEach { d -> DrinkChip(d, d.id == current?.id) { Drinks.add(c, d) } }
+        @Composable fun softRow() {
+            Label(if (alcohol >= limit) "Switch to" else "Soft and 0.0")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                soft.forEach { d -> DrinkChip(d, d.id == current?.id) { Drinks.add(c, d) } }
+            }
         }
+        if (alcohol >= limit) { softRow(); alcRow() } else { alcRow(); softRow() }
         if (cat.isEmpty()) Text(err ?: "Loading your drinks…", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
 
         // The plan
@@ -196,7 +201,7 @@ private fun DrinkChip(d: Drink, selected: Boolean, onClick: () -> Unit) {
         color = if (selected) cs.secondaryContainer else cs.surfaceContainerHigh) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text(d.label, style = MaterialTheme.typography.titleSmall)
-            Text("${d.carbs.toInt()} g" + if (d.alcoholG > 0) "" else if (d.carbs >= 10) " · counts for insulin" else "",
+            Text("${d.carbs.toInt()} g" + if (d.soft && d.carbs >= 10) " · counts for insulin" else "",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
