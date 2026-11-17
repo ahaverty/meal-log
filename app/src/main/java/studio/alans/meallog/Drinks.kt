@@ -115,6 +115,8 @@ object Drinks {
             // he just reached his plan: the button switches to a soft drink for the next one
             if (!d.soft && before < limit(c) && alcoholCount(list) >= limit(c)) softPick(c)?.let { j.put("current", it.json()) }
         }
+        HeadingHome.stillOut(c)   // a drink after "heading home": still out, ask again later
+        HeadingHome.arm(c)
         flush(c)
     }
 
@@ -133,7 +135,7 @@ object Drinks {
         }
     }
 
-    fun end(c: Context) { val j = night(c); j.put("ended", System.currentTimeMillis()); save(c, j) }
+    fun end(c: Context) { val j = night(c); j.put("ended", System.currentTimeMillis()); save(c, j); HeadingHome.disarm(c) }
 
     /** Sends whatever hasn't reached the diary yet. Safe to call often. */
     fun flush(c: Context) {
@@ -193,6 +195,9 @@ object Drinks {
                 if (kept.size != had(app).size) putHad(app, kept)
             }
         }
+        val homeFor = prefs(app).getLong("home_for", 0)
+        if (homeFor != 0L && homeFor != lastAt(app) && lastAt(app) > homeFor) HeadingHome.stillOut(app)
+        HeadingHome.sync(app)
         version.value++
         return active(app)
     }

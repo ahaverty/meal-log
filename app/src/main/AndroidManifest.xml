@@ -5,6 +5,8 @@
     <!-- The mic button on the Plan page (speech to text, asked the first time it's tapped). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Drinks: notices him walking, cycling or in a car home after a night out. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -97,6 +99,11 @@
         <!-- Self-update install progress (asks the user to confirm). -->
         <receiver
             android:name=".Updater$InstallStatus"
+            android:exported="false" />
+
+        <!-- Heading home after drinks: movement transitions and its alarms. -->
+        <receiver
+            android:name=".HomeReceiver"
             android:exported="false" />
 
         <receiver

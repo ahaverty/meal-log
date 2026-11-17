@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.14.1:** once you reach your drinks plan, the soft drinks and 0.0 list moves to the top; "counts for insulin" only shows on soft drinks; the beer list is trimmed to your top 5.
+**New in v0.15.0:** **Heading home** after drinks. When you've been walking, cycling or in a car for a few minutes during a night out (not a trip to the bar or the toilet), or 2 h after your last drink, Meal Log asks once: start Ease-off now (longer if past nights like this still went low), a small snack entered as Hypo treatment if glucose is low or dropping fast, no Boost tonight. It sets overnight glucose checks timed from your last drink that only ring if you're under 5 and falling. The advice learns from how your own past drinking nights went overnight. **Not yet** on the notification means you're moving on to another pub; logging another drink does the same. Allow **Physical activity** when asked, or it only uses the 2 h fallback. The **Heading home** button on Drinks does it by hand.
+
+**v0.14.1:** once you reach your drinks plan, the soft drinks and 0.0 list moves to the top; "counts for insulin" only shows on soft drinks; the beer list is trimmed to your top 5.
 
 **v0.14.0:** **Drinks** for nights out. Tap a drink once to log it, then the big **Another** button repeats it. A row of glasses shows the count and your plan (4 by default, then soft drinks). Tap a glass further along and the ones you missed are logged too. When you reach your plan the button switches to a soft drink or 0.0 (the carbs are on every button: 0.0 beer and Coke count). Taps show at once and save in the background, retrying on bad signal. While a night is on (a drink in the last 5 h), the app opens on Drinks; a pint logged from the Log page, by voice or on the web joins the count. **Done for tonight** ends it. The **Plan** page now shows the last 24 hours of carbs, protein, fat and sat fat against your nutrition-system goals, and the planner sees them and tonight's drinks.
 

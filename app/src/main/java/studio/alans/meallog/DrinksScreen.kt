@@ -59,6 +59,10 @@ private val Soft = Color(0xFF5AA9E6)
 fun DrinksScreen() {
     val c = LocalContext.current
     Drinks.version.collectAsState().value
+    HeadingHome.version.collectAsState().value
+    // movement sensing for "heading home": asked once, the first time a night is on
+    val askMove = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> if (ok) HeadingHome.arm(c) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var err by remember { mutableStateOf<String?>(null) }
     var undoArmed by remember { mutableStateOf(false) }
@@ -82,7 +86,14 @@ fun DrinksScreen() {
     // each glass in order, by what filled it
     val glasses = had.flatMap { h -> List(h.count) { h.drink.soft } }
 
+    LaunchedEffect(had.isNotEmpty()) {
+        if (had.isNotEmpty() && !HeadingHome.canSense(c) && !Prefs(c).p.getBoolean("asked_move", false)) {
+            Prefs(c).p.edit().putBoolean("asked_move", true).apply()
+            askMove.launch(android.Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        HeadingHome.plan(c)?.let { HomeCard(it) }
         // The count
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 4.dp)) {
             Text("$alcohol", fontSize = 64.sp, fontWeight = FontWeight.Light,
@@ -172,11 +183,13 @@ fun DrinksScreen() {
             IconButton(onClick = { Drinks.setLimit(c, limit - 1) }) { Icon(painterResource(R.drawable.ic_minus), "One fewer") }
             IconButton(onClick = { Drinks.setLimit(c, limit + 1) }) { Text("+", fontSize = 22.sp) }
         }
-        if (had.isNotEmpty()) {
-            OutlinedButton(onClick = { Drinks.end(c) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Text("Done for tonight")
+        if (had.isNotEmpty() && active) {
+            OutlinedButton(onClick = { HeadingHome.trigger(c, "tapped", notify = false); Drinks.end(c) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("Heading home")
             }
-            Text("Alcohol can bring glucose down overnight and into the morning.",
+            Text(if (HeadingHome.canSense(c)) "If you forget, it asks by itself once you've been walking or in a car for a few minutes, or 2 h after your last drink."
+                else "It asks by itself 2 h after your last drink. Allow Physical activity in the app's settings and it notices you walking or in a car home too.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         }
     }
@@ -230,5 +243,43 @@ private fun Glass(filled: Boolean, soft: Boolean, n: Int, last: Boolean, onClick
             if (last && !filled) drawLine(col, Offset(w * 0.2f, h * 0.55f), Offset(w * 0.8f, h * 0.55f), 2.dp.toPx())
         }
         Text("$n", style = MaterialTheme.typography.labelSmall, color = if (filled) cs.onSurface else cs.onSurfaceVariant)
+    }
+}
+
+/** Heading home: what to do before bed, why (from his past nights), and the checks that are set. */
+@Composable
+private fun HomeCard(plan: org.json.JSONObject) {
+    val c = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = RoundedCornerShape(20.dp), color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Heading home", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(plan.optString("summary"), style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer.copy(alpha = 0.8f))
+            plan.optJSONArray("steps").objects().forEachIndexed { i, st ->
+                Row(Modifier.padding(top = 10.dp)) {
+                    Text("${i + 1}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(22.dp))
+                    Column {
+                        Text(st.optString("do"), style = MaterialTheme.typography.labelLarge, color = cs.primary)
+                        Text(st.optString("text"), style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+            val checks = plan.optJSONArray("checks").objects()
+            val at = plan.optLong("at", System.currentTimeMillis())
+            if (checks.isNotEmpty()) {
+                Text("Glucose checks set for " + checks.joinToString(", ") { Api.hhmm(at + it.optInt("in_min") * 60_000L) } +
+                    ". They only ring if you're under 5 and falling.",
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+            }
+            plan.optJSONArray("why").strings().forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSecondaryContainer.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 6.dp))
+            }
+            Camaps.installed(c)?.let { pkg ->
+                Button(onClick = { c.startActivity(c.packageManager.getLaunchIntentForPackage(pkg)!!) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("Open CamAPS") }
+            }
+        }
     }
 }

@@ -26,8 +26,8 @@ android {
         minSdk = 31
         targetSdk = 35
         // A release = bump both, add a RELEASE_NOTES.md line, push a v* tag (CI publishes it).
-        versionCode = 131
-        versionName = "0.14.1"
+        versionCode = 150
+        versionName = "0.15.0"
         buildConfigField("String", "MEAL_URL", secret("MEAL_URL"))
         buildConfigField("String", "MEAL_TOKEN", secret("MEAL_TOKEN"))
         buildConfigField("String", "CF_ID", secret("CF_ID"))
@@ -89,6 +89,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.android.gms:play-services-location:21.3.0")   // activity recognition: heading home after drinks
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
 }

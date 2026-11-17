@@ -130,6 +130,7 @@ private fun App(route: Route, go: (Route) -> Unit) {
     // A drink logged by voice or the web app starts a night too: the plain open moves on to Drinks.
     LaunchedEffect(route.n) {
         if (Drinks.pending(c)) Drinks.flush(c)
+        HeadingHome.sync(c)
         if (route.auto && runCatching { Drinks.refresh(c) }.getOrDefault(false)) go(Route(Page.Drinks))
     }
     val drinksOn = run { Drinks.version.collectAsState().value; Drinks.active(c) }

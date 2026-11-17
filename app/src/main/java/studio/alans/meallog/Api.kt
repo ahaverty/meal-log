@@ -210,6 +210,9 @@ class Api(c: Context) {
         return call(post("/drink", j)).optJSONArray("entry_ids").strings()
     }
 
+    /** Heading home after drinks: steps (Ease-off, snack, no Boost), overnight checks, past nights. */
+    suspend fun home(): JSONObject = call(req("/home").build())
+
     /** The last 24 h of carbs, protein, fat and sat fat against his nutrition-system goals. */
     suspend fun nutrients(): JSONObject = call(req("/nutrients").build())
 
