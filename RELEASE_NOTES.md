@@ -7,7 +7,9 @@
 3. In Meal Log: allow **Display over other apps** and notifications, and fill in Settings with your
    meal server (see the README).
 
-**New in v0.15.0:** **Heading home** after drinks. When you've been walking, cycling or in a car for a few minutes during a night out (not a trip to the bar or the toilet), or 2 h after your last drink, Meal Log asks once: start Ease-off now (longer if past nights like this still went low), a small snack entered as Hypo treatment if glucose is low or dropping fast, no Boost tonight. It sets overnight glucose checks timed from your last drink that only ring if you're under 5 and falling. The advice learns from how your own past drinking nights went overnight. **Not yet** on the notification means you're moving on to another pub; logging another drink does the same. Allow **Physical activity** when asked, or it only uses the 2 h fallback. The **Heading home** button on Drinks does it by hand.
+**New in v0.15.1:** when your plan has a slow part, the "Logged" notification now says so and reminds you to add the Slowly absorbed meal in CamAPS, instead of showing only the bolus grams.
+
+**v0.15.0:** **Heading home** after drinks. When you've been walking, cycling or in a car for a few minutes during a night out (not a trip to the bar or the toilet), or 2 h after your last drink, Meal Log asks once: start Ease-off now (longer if past nights like this still went low), a small snack entered as Hypo treatment if glucose is low or dropping fast, no Boost tonight. It sets overnight glucose checks timed from your last drink that only ring if you're under 5 and falling. The advice learns from how your own past drinking nights went overnight. **Not yet** on the notification means you're moving on to another pub; logging another drink does the same. Allow **Physical activity** when asked, or it only uses the 2 h fallback. The **Heading home** button on Drinks does it by hand.
 
 **v0.14.1:** once you reach your drinks plan, the soft drinks and 0.0 list moves to the top; "counts for insulin" only shows on soft drinks; the beer list is trimmed to your top 5.
 

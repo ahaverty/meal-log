@@ -43,7 +43,12 @@ object PlanAutoLog {
                 .onFailure { Log.w("MealLog", "auto-log plan", it) }.isSuccess
             if (ok) {
                 p.loggedBolus = at
-                notify(c, "Logged from your plan", "$summary, ${carbs.toInt()} g at ${Api.hhmm(at)}. Tap if it's wrong.",
+                // 18 Nov: "32 g" read as the whole meal when the plan was 32 g bolus + 17 g slow.
+                val slow = plan.slowCarbs?.takeIf { it > 0 }?.toInt()
+                val text = if (slow != null)
+                    "$summary. Bolus ${carbs.toInt()} g at ${Api.hhmm(at)} logged. Still to do: CamAPS Add meal > Slowly absorbed meal $slow g. Tap if it's wrong."
+                else "$summary, ${carbs.toInt()} g at ${Api.hhmm(at)}. Tap if it's wrong."
+                notify(c, if (slow != null) "Logged. Now add the slow $slow g" else "Logged from your plan", text,
                     Intent(Intent.ACTION_VIEW, Uri.parse("meallog://log")).setPackage(c.packageName))
             } else {
                 p.planSummary = summary
