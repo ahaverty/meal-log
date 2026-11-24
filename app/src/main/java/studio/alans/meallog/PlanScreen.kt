@@ -662,9 +662,31 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = cs.onPrimaryContainer.copy(alpha = 0.14f))
                 if (i == 0 && st.kind == CamapsStep.Kind.Bolus) BolusHero(st, eat) else StepRow(st, eat)
             }
-            Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
-                Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+            val planKey = pl.asked.lines().first() + "|" + (pl.session ?: "") + "|" + pl.madeAt
+            fun nowMin(): Int { val cal = java.util.Calendar.getInstance(); return cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE) }
+            val fx = remember(pl, cv) { FxRunPlan.build(cv, nowMin(), planKey) }
+            if (fx.hasSteps) {
+                // built again at the tap, so "Boost starts now" is judged by the time it is tapped
+                Button(onClick = { msg = FxRunPlan.open(c, FxRunPlan.build(cv, nowMin(), planKey)) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
+                    Text(if (fx.hasMeal) "Run in CamAPS, stop at the bolus" else "Run in CamAPS", style = MaterialTheme.typography.titleSmall)
+                }
+                if (fx.notIncluded.isNotEmpty()) {
+                    Text("Not included, do these yourself: " + fx.notIncluded.joinToString(", "),
+                        style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp))
+                }
+            }
+            if (fx.hasSteps) {
+                OutlinedButton(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(48.dp)) {
+                    Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+                }
+            } else {
+                Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
+                    Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+                }
             }
         }
     }
