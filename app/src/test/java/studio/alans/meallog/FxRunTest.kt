@@ -54,4 +54,11 @@ class FxRunTest {
         val r = FxRunPlan.build(cv(st(CamapsStep.Kind.Bolus, "Bolus", "200 g"), st(CamapsStep.Kind.AddMeal, "Add meal › Slowly absorbed meal", "2 g")), now, "k")
         assertEquals("", r.steps)
     }
+
+    @Test fun theCorrectionFollowsThePlannersTapGlucoseLine() {
+        fun bolus(sub: String?) = CamapsStep(CamapsStep.Kind.Bolus, "Bolus", "36 g", null, sub)
+        assertTrue(FxRunPlan.build(CamapsView(null, null, listOf(bolus("now. Tap glucose: yes, adds about 1.4 U (9.7 rising)")), null), now, "k").correction)
+        assertTrue(!FxRunPlan.build(CamapsView(null, null, listOf(bolus("now. Tap glucose no, alcohol since last night")), null), now, "k").correction)
+        assertTrue(!FxRunPlan.build(CamapsView(null, null, listOf(bolus(null)), null), now, "k").correction)
+    }
 }

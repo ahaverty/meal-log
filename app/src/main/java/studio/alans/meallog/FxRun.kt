@@ -13,7 +13,7 @@ import java.security.MessageDigest
  * The key is made from the steps and the plan, so tapping the same plan twice is the same key and FX Watcher
  * says "already run" instead of starting Boost or a slow meal a second time.
  */
-data class FxRun(val steps: String, val key: String, val notIncluded: List<String>) {
+data class FxRun(val steps: String, val key: String, val notIncluded: List<String>, val correction: Boolean = false) {
     val hasSteps: Boolean get() = steps.isNotBlank()
     val hasMeal: Boolean get() = steps.split(";").any { it.startsWith("MEAL:") }
     val onlyMeal: Boolean get() = steps.startsWith("MEAL:") && !steps.contains(";")
@@ -44,6 +44,10 @@ object FxRunPlan {
         return if (rounded in 15..360) rounded to true else null
     }
 
+    /** The planner's own tap-glucose decision for the bolus: "Tap glucose: yes, adds about 1.4 U ...". Anything else is no. */
+    private fun tapsGlucose(cv: CamapsView): Boolean =
+        cv.steps.any { it.kind == CamapsStep.Kind.Bolus && Regex("""tap glucose:?\s*yes""", RegexOption.IGNORE_CASE).containsMatchIn(it.sub ?: "") }
+
     fun build(cv: CamapsView, nowMin: Int, planKey: String): FxRun {
         val parts = mutableListOf<Pair<Int, String>>()      // rank, "KIND:n"
         val skipped = mutableListOf<String>()
@@ -71,9 +75,10 @@ object FxRunPlan {
             }
         }
         val steps = parts.sortedBy { it.first }.joinToString(";") { it.second }
-        val digest = MessageDigest.getInstance("SHA-256").digest("$steps|$planKey".toByteArray())
+        val correction = parts.any { it.second.startsWith("MEAL:") } && tapsGlucose(cv)
+        val digest = MessageDigest.getInstance("SHA-256").digest("$steps|$correction|$planKey".toByteArray())
         val key = "p" + digest.joinToString("") { "%02x".format(it) }.take(20)
-        return FxRun(steps, key, skipped)
+        return FxRun(steps, key, skipped, correction)
     }
 
     /** Opens FX Watcher's "Run in CamAPS?" screen. Nothing runs until Alan taps Run there. Returns a reason it couldn't. */
@@ -81,7 +86,7 @@ object FxRunPlan {
         if (!run.hasSteps) return "Nothing in this plan can be run for you"
         return runCatching {
             c.startActivity(Intent("studio.alans.fxwatcher.action.RUN_PLAN").setPackage("studio.alans.fxwatcher")
-                .putExtra("steps", run.steps).putExtra("key", run.key).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                .putExtra("steps", run.steps).putExtra("key", run.key).putExtra("correction", run.correction).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             null
         }.getOrElse { "FX Watcher (the latest build) isn't there to run it" }
     }
