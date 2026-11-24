@@ -669,7 +669,7 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
                 // built again at the tap, so "Boost starts now" is judged by the time it is tapped
                 Button(onClick = { msg = FxRunPlan.open(c, FxRunPlan.build(cv, nowMin(), planKey)) },
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
-                    Text(if (fx.hasMeal) "Run in CamAPS, stop at the bolus" else "Run in CamAPS", style = MaterialTheme.typography.titleSmall)
+                    Text(if (fx.onlyMeal) "Fill CamAPS bolus calculator" else if (fx.hasMeal) "Run in CamAPS, end at the bolus calculator" else "Run in CamAPS", style = MaterialTheme.typography.titleSmall)
                 }
                 if (fx.notIncluded.isNotEmpty()) {
                     Text("Not included, do these yourself: " + fx.notIncluded.joinToString(", "),

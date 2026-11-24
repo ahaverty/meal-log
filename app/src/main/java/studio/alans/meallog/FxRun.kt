@@ -16,6 +16,7 @@ import java.security.MessageDigest
 data class FxRun(val steps: String, val key: String, val notIncluded: List<String>) {
     val hasSteps: Boolean get() = steps.isNotBlank()
     val hasMeal: Boolean get() = steps.split(";").any { it.startsWith("MEAL:") }
+    val onlyMeal: Boolean get() = steps.startsWith("MEAL:") && !steps.contains(";")
 }
 
 object FxRunPlan {
