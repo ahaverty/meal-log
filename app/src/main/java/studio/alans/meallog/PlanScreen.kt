@@ -47,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -644,6 +645,21 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
     val cs = MaterialTheme.colorScheme
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
+    // The bolus FX Watcher saw delivered, kept live: the card says so once it matches this plan.
+    val bolusPrefs = remember { Prefs(c) }
+    var lastBolus by remember { mutableStateOf(Triple(bolusPrefs.lastBolusAt, bolusPrefs.lastBolusUnits, bolusPrefs.lastBolusCarbs)) }
+    DisposableEffect(Unit) {
+        val l = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            lastBolus = Triple(bolusPrefs.lastBolusAt, bolusPrefs.lastBolusUnits, bolusPrefs.lastBolusCarbs)
+        }
+        bolusPrefs.p.registerOnSharedPreferenceChangeListener(l)
+        onDispose { bolusPrefs.p.unregisterOnSharedPreferenceChangeListener(l) }
+    }
+    val plannedCarbs = pl.carbs
+    val delivered = plannedCarbs != null && lastBolus.first >= pl.madeAt - 5 * 60_000L &&
+        kotlin.math.abs(lastBolus.third - plannedCarbs) <= kotlin.math.max(5.0, plannedCarbs * 0.2)
+    // FX Watcher's carb widget offers this plan's bolus carbs (if its "Carbs for CamAPS" is on).
+    LaunchedEffect(pl) { Camaps.sharePlanWithFxWatcher(c, pl) }
 
     Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
         maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -660,9 +676,40 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = cs.onPrimaryContainer.copy(alpha = 0.14f))
                 if (i == 0 && st.kind == CamapsStep.Kind.Bolus) BolusHero(st, eat) else StepRow(st, eat)
             }
-            Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
-                Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+            val planKey = pl.asked.lines().first() + "|" + (pl.session ?: "") + "|" + pl.madeAt
+            fun nowMin(): Int { val cal = java.util.Calendar.getInstance(); return cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE) }
+            val fx = remember(pl, cv) { FxRunPlan.build(cv, nowMin(), planKey) }
+            if (delivered) {
+                Text("Bolus delivered at " + Api.hhmm(lastBolus.first) + ", " + "%.1f".format(lastBolus.second) + " U",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp))
+                Text("That is this plan done. Nothing more to run.", style = MaterialTheme.typography.bodySmall,
+                    color = cs.onPrimaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp))
+            } else if (fx.hasSteps) {
+                // built again at the tap, so "Boost starts now" is judged by the time it is tapped
+                Button(onClick = { msg = FxRunPlan.open(c, FxRunPlan.build(cv, nowMin(), planKey)) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
+                    Text(if (fx.onlyMeal) "Fill CamAPS bolus calculator" else if (fx.hasMeal) "Run in CamAPS, end at the bolus calculator" else "Run in CamAPS", style = MaterialTheme.typography.titleSmall)
+                }
+                if (fx.notIncluded.isNotEmpty()) {
+                    Text("Not included, do these yourself: " + fx.notIncluded.joinToString(", "),
+                        style = MaterialTheme.typography.bodySmall, color = cs.onPrimaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp))
+                }
+            }
+            if (delivered) {
+                // nothing more to offer for this plan
+            } else if (fx.hasSteps) {
+                OutlinedButton(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(48.dp)) {
+                    Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+                }
+            } else {
+                Button(onClick = { msg = Camaps.openWithOverlay(c, pl) },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp).height(56.dp)) {
+                    Text("Open CamAPS with this plan", style = MaterialTheme.typography.titleSmall)
+                }
             }
         }
     }

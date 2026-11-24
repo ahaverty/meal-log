@@ -149,6 +149,20 @@ object Camaps {
         return CamapsView(null, null, steps, null)
     }
 
+    /**
+     * Tells FX Watcher (3.15+) the plan's bolus carbs so its home-screen widget can offer them.
+     * Nothing is typed anywhere until Alan taps that amount on the widget. Ignored if FX Watcher is
+     * not installed or does not take it.
+     */
+    fun sharePlanWithFxWatcher(c: Context, pl: Plan) {
+        val g = pl.carbs?.let { Math.round(it).toInt() } ?: return
+        if (g < 1 || g > 150) return
+        runCatching {
+            c.sendBroadcast(Intent("studio.alans.fxwatcher.action.SET_PLAN").setPackage("studio.alans.fxwatcher")
+                .putExtra("items", "Plan|$g"))
+        }
+    }
+
     fun installed(c: Context): String? = PACKAGES.firstOrNull { c.packageManager.getLaunchIntentForPackage(it) != null }
 
     /**
