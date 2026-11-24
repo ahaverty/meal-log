@@ -644,6 +644,8 @@ private fun PlanResult(pl: Plan, onShift: (Long) -> Unit, onNotEating: () -> Uni
     val cs = MaterialTheme.colorScheme
     val cv = remember(pl) { Camaps.view(pl) }
     var msg by remember { mutableStateOf<String?>(null) }
+    // FX Watcher's carb widget offers this plan's bolus carbs (if its "Carbs for CamAPS" is on).
+    LaunchedEffect(pl) { Camaps.sharePlanWithFxWatcher(c, pl) }
 
     Text(pl.asked.lines().first(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
         maxLines = 2, overflow = TextOverflow.Ellipsis)
